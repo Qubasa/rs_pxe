@@ -101,45 +101,4 @@ pub fn parse_tuntap_options(matches: &mut Matches) -> TunTapInterface {
     }
 }
 
-pub fn add_middleware_options(opts: &mut Options, _free: &mut [&str]) {
-    opts.optopt("", "pcap", "Write a packet capture file", "FILE");
-    opts.optopt(
-        "",
-        "drop-chance",
-        "Chance of dropping a packet (%)",
-        "CHANCE",
-    );
-    opts.optopt(
-        "",
-        "corrupt-chance",
-        "Chance of corrupting a packet (%)",
-        "CHANCE",
-    );
-    opts.optopt(
-        "",
-        "size-limit",
-        "Drop packets larger than given size (octets)",
-        "SIZE",
-    );
-    opts.optopt(
-        "",
-        "tx-rate-limit",
-        "Drop packets after transmit rate exceeds given limit \
-                                      (packets per interval)",
-        "RATE",
-    );
-    opts.optopt(
-        "",
-        "rx-rate-limit",
-        "Drop packets after transmit rate exceeds given limit \
-                                      (packets per interval)",
-        "RATE",
-    );
-    opts.optopt(
-        "",
-        "shaping-interval",
-        "Sets the interval for rate limiting (ms)",
-        "RATE",
-    );
-}
 

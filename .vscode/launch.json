@@ -1,0 +1,45 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'rs_pxe'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=rs_pxe",
+                    "--package=rs_pxe"
+                ],
+                "filter": {
+                    "name": "rs_pxe",
+                    "kind": "bin"
+                }
+            },
+            "args": [ "--raw", "enp2s0" ],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'rs_pxe'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=rs_pxe",
+                    "--package=rs_pxe"
+                ],
+                "filter": {
+                    "name": "rs_pxe",
+                    "kind": "bin"
+                }
+            },
+            "args": [ "$IPXE/undionly.kpxe" ],
+            "cwd": "${workspaceFolder}"
+        }
+    ]
+}

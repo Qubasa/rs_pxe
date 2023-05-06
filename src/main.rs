@@ -41,7 +41,6 @@ fn main() {
     opts.optopt("", "tap", "TAP interface to use", "tap0");
     opts.optopt("", "ip", "Ip address to give the interface", DEFAULT_IP);
     opts.optopt("", "mac", "Mac address to give the interface", DEFAULT_MAC);
-    utils::add_middleware_options(&mut opts, &mut _free);
 
     let mut matches = utils::parse_options(&opts, _free);
     let hardware_addr = &matches
@@ -87,8 +86,8 @@ fn main() {
 
         server(&mut device, &mut iface);
     } else {
-        let brief = format!("Usage: {} FILE [options]", "pxe");
-        panic!("{}", opts.usage(&brief));
+        let brief = "Either --raw or --tun or --tap must be specified";
+        panic!("{}", opts.usage(brief));
     };
 }
 
@@ -103,6 +102,7 @@ pub fn server<DeviceT: AsRawFd>(device: &mut DeviceT, iface: &mut Interface)
 where
     DeviceT: for<'d> Device,
 {
+    log::info!("Starting server");
     let fd = device.as_raw_fd();
     let server_mac_address = match iface.hardware_addr() {
         HardwareAddress::Ethernet(addr) => addr,
@@ -123,6 +123,14 @@ where
         let mut client_mac_address: Option<EthernetAddress> = None;
         let mut transaction_id: Option<u16> = None;
         let mut secs = 0;
+        rx_token.consume(|buffer| {
+            let ether = EthernetFrame::new_checked(&buffer).unwrap();
+
+            if ether.dst_addr() == EthernetAddress::BROADCAST {
+
+                     
+            }
+        });
         // rx_token
         //     .consume(Instant::now(), |buffer| {
         //         let ether = EthernetFrame::new_checked(&buffer).unwrap();
