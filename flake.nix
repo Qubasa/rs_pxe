@@ -7,9 +7,14 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+
+    smoltcp = {
+      url = "git+file:./external/smoltcp";
+      flake = false;
+    };
   };
 
-  outputs = { self, nixpkgs, utils, nix-fenix}:
+  outputs = { self, nixpkgs, utils, nix-fenix, smoltcp}:
     utils.lib.eachDefaultSystem (system:
       let
         overlays = [ nix-fenix.overlays.default ];
@@ -28,6 +33,13 @@
           target64
         ];
 
+        buildDir = pkgs.symlinkJoin {
+          name = "build";
+          paths = [ self ];
+          postBuild = ''
+            ln -sf ${smoltcp} $out/external/smoltcp
+          '';
+        };
         buildDeps = with pkgs; [
           myrust
         ]  ++ (with pkgs.llvmPackages_latest; [
@@ -44,9 +56,10 @@
           cargo = myrust;
           rustc = myrust;
         }).buildRustPackage {
-          src = ./.;
+          src = buildDir;
           cargoLock.lockFile = ./Cargo.lock;
           pname = "pxe-rs";
+          nativeBuildInputs = [ pkgs.breakpointHook ];
           version = "0.1.0";
         };
 

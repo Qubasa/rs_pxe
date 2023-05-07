@@ -41,6 +41,7 @@
       "inputs": {
         "nix-fenix": "nix-fenix",
         "nixpkgs": "nixpkgs",
+        "smoltcp": "smoltcp",
         "utils": "utils"
       }
     },
@@ -59,6 +60,22 @@
         "ref": "nightly",
         "repo": "rust-analyzer",
         "type": "github"
+      }
+    },
+    "smoltcp": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1683500187,
+        "narHash": "sha256-8OeMPLhGwgEnkdnXv6XnlH/mydEZltMAy3+5r+1J5fA=",
+        "ref": "refs/heads/pxe_2",
+        "rev": "d5c99d880ff8899896f747ba93b12fd9976b55df",
+        "revCount": 1468,
+        "type": "git",
+        "url": "file:./external/smoltcp"
+      },
+      "original": {
+        "type": "git",
+        "url": "file:./external/smoltcp"
       }
     },
     "utils": {
