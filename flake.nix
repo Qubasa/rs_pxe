@@ -7,14 +7,17 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-
+    nix-pre-commit-hooks = {
+      url = "github:cachix/pre-commit-hooks.nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
     smoltcp = {
       url = "github:luis-hebendanz/smoltcp/pxe_2";
       flake = false;
     };
   };
 
-  outputs = { self, nixpkgs, utils, nix-fenix, smoltcp}:
+  outputs = { self, nixpkgs, utils, nix-fenix, smoltcp, nix-pre-commit-hooks, ... }:
     utils.lib.eachDefaultSystem (system:
       let
         overlays = [ nix-fenix.overlays.default ];
@@ -42,7 +45,7 @@
         };
         buildDeps = with pkgs; [
           myrust
-        ]  ++ (with pkgs.llvmPackages_latest; [
+        ] ++ (with pkgs.llvmPackages_latest; [
           lld
         ]);
 
@@ -52,6 +55,21 @@
         ];
       in
       rec {
+
+        checks = {
+          pre-commit-check = nix-pre-commit-hooks.lib.${system}.run {
+            src = ./.;
+            hooks = {
+              nixpkgs-fmt.enable = true;
+              #rustfmt.enable = true;
+              #clippy.enable = true;
+              #gptcommit.enable = true;
+              shellcheck.enable = true;
+              #nixpkgs-fmt.enable = true;
+            };
+          };
+        };
+
         packages.default = (pkgs.makeRustPlatform {
           cargo = myrust;
           rustc = myrust;
@@ -74,6 +92,7 @@
           RUST_SRC_PATH = rustPlatform.rustLibSrc;
           shellHook = ''
             export PATH=$PATH:~/.cargo/bin
+            ${self.checks.${system}.pre-commit-check.shellHook}
           '';
         };
       });
