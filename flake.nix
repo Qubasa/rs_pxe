@@ -9,7 +9,7 @@
 
 
     smoltcp = {
-      url = "git+file:./external/smoltcp";
+      url = "github:luis-hebendanz/smoltcp/pxe_2";
       flake = false;
     };
   };
@@ -59,7 +59,7 @@
           src = buildDir;
           cargoLock.lockFile = ./Cargo.lock;
           pname = "pxe-rs";
-          nativeBuildInputs = [ pkgs.breakpointHook ];
+          #nativeBuildInputs = [ pkgs.breakpointHook ];
           version = "0.1.0";
         };
 
