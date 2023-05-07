@@ -61,11 +61,10 @@
             src = ./.;
             hooks = {
               nixpkgs-fmt.enable = true;
-              #rustfmt.enable = true;
-              #clippy.enable = true;
-              #gptcommit.enable = true;
+              rustfmt.enable = true;
+              clippy.enable = true;
+              gptcommit.enable = true;
               shellcheck.enable = true;
-              #nixpkgs-fmt.enable = true;
             };
           };
         };
