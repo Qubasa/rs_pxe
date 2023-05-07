@@ -32,12 +32,10 @@
           myrust
         ]  ++ (with pkgs.llvmPackages_latest; [
           lld
-          llvm
         ]);
 
         runtimeDeps = with pkgs; [
           qemu
-          ipxe
           cargo-watch
         ];
       in
@@ -63,8 +61,6 @@
           RUST_SRC_PATH = rustPlatform.rustLibSrc;
           shellHook = ''
             export PATH=$PATH:~/.cargo/bin
-            export IPXE=${ipxe}
-            export IPXE2=/nix/store/5azhyr438jcjqifvn3lcdpw3a9p5zc08-ipxe-unstable-2022-04-06
           '';
         };
       });

@@ -36,8 +36,8 @@ setup_net
 PAYLOAD=$(cat <<EOF
 set -xe
 sudo setcap cap_net_admin,cap_net_raw=eip ./target/debug/rs_pxe
-./target/debug/rs_pxe --raw enp2s0 &
-qemu-system-x86_64 -enable-kvm -m 1024 -net nic -net tap,ifname=$TAPIF,script=no,downscript=no -cdrom ipxe.iso -serial stdio -display none 
+./target/debug/rs_pxe --raw "$LAN" &
+qemu-system-x86_64 -enable-kvm -m 1024 -net nic -net tap,ifname="$TAPIF",script=no,downscript=no -cdrom ipxe.iso -serial stdio -display none 
 EOF
 )
 

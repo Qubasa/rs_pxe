@@ -43,7 +43,7 @@ fn main() {
     opts.optopt("", "mac", "Mac address to give the interface", DEFAULT_MAC);
 
     let mut matches = utils::parse_options(&opts, _free);
-    let hardware_addr = &matches
+    let hardware_addr: &EthernetAddress = &matches
         .opt_get_default("mac", EthernetAddress::from_str(DEFAULT_MAC).unwrap())
         .unwrap();
     let ip = &matches
@@ -56,12 +56,13 @@ fn main() {
         let mut device = RawSocket::new(&interface, Medium::Ethernet).unwrap();
 
         // Create interface
-        let mut config = Config::new();
+        let mut config = match device.capabilities().medium {
+            Medium::Ethernet => Config::new(Into::into(*hardware_addr)),
+            Medium::Ip => Config::new(smoltcp::wire::HardwareAddress::Ip),
+            Medium::Ieee802154 => todo!(),
+        };
         config.random_seed = rand::random();
 
-        if device.capabilities().medium == Medium::Ethernet {
-            config.hardware_addr = Some(Into::into(*hardware_addr));
-        }
         let mut iface = Interface::new(config, &mut device);
 
         iface.update_ip_addrs(|ip_addr| {
@@ -73,11 +74,12 @@ fn main() {
         let mut device = utils::parse_tuntap_options(&mut matches);
 
         // Create interface
-        let mut config = Config::new();
+        let mut config = match device.capabilities().medium {
+            Medium::Ethernet => Config::new(Into::into(*hardware_addr)),
+            Medium::Ip => Config::new(smoltcp::wire::HardwareAddress::Ip),
+            Medium::Ieee802154 => todo!(),
+        };
         config.random_seed = rand::random();
-        if device.capabilities().medium == Medium::Ethernet {
-            config.hardware_addr = Some(Into::into(*hardware_addr));
-        }
         let mut iface = Interface::new(config, &mut device);
 
         iface.update_ip_addrs(|ip_addr| {
@@ -123,14 +125,100 @@ where
         let mut client_mac_address: Option<EthernetAddress> = None;
         let mut transaction_id: Option<u16> = None;
         let mut secs = 0;
-        rx_token.consume(|buffer| {
-            let ether = EthernetFrame::new_checked(&buffer).unwrap();
+        rx_token
+            .consume(|buffer| {
+                let ether = EthernetFrame::new_checked(&buffer).unwrap();
 
-            if ether.dst_addr() == EthernetAddress::BROADCAST {
+                if ether.dst_addr() == EthernetAddress::BROADCAST {
+                    log::info!("Received broadcast packet from {}", ether.src_addr());
 
-                     
-            }
-        });
+                    let ipv4 = match Ipv4Packet::new_checked(ether.payload()) {
+                        Ok(i) => i,
+                        Err(e) => {
+                            error!("Parsing ipv4 packet failed: {}", e);
+                            return Ok::<(), Error>(());
+                        }
+                    };
+
+                    if ipv4.dst_addr() != Ipv4Address::BROADCAST {
+                        log::info!("Packet not for us, ignoring");
+                        return Ok::<(), Error>(());
+                    }
+
+                    let udp = match UdpPacket::new_checked(ipv4.payload()) {
+                        Ok(u) => u,
+                        Err(e) => {
+                            error!("Parsing udp packet failed: {}", e);
+                            return Ok::<(), Error>(());
+                        }
+                    };
+
+                    if udp.dst_port() != 67 {
+                        log::info!("Packet not for us, ignoring");
+                        return Ok::<(), Error>(());
+                    }
+
+                    let dhcp = match DhcpPacket::new_checked(udp.payload()) {
+                        Ok(d) => d,
+                        Err(e) => {
+                            error!("Parsing dhcp packet failed: {}", e);
+                            return Ok::<(), Error>(());
+                        }
+                    };
+
+                    if dhcp.opcode() != DhcpMessageType::Request.opcode() {
+                        log::info!("Packet not for us, ignoring");
+                        return Ok::<(), Error>(());
+                    }
+
+                    secs = dhcp.secs();
+                    let mut next = dhcp.options();
+
+                    for option in dhcp.options() {
+                        if option.kind == 93 {
+                            // Client System Architecture
+                            let (prefix, body, suffix) = unsafe { option.data.align_to::<u16>() };
+                            if !prefix.is_empty() || !suffix.is_empty() {
+                                error!("Invalid arch type list. Improperly aligned");
+                                return Err(Error);
+                            }
+                            // system_arches = body
+                            //             .iter()
+                            //             .map(|&i| PxeArchType::try_from(u16::from_be(i)).unwrap())
+                            //             .collect();
+                        }
+                    }
+                    // loop {
+                    //     (next, option) = DhcpOption::parse(next).unwrap();
+
+                    //     if let DhcpOption::ClientArchTypeList(data) = option {
+                    //         let (prefix, body, suffix) = unsafe { data.align_to::<u16>() };
+                    //         if !prefix.is_empty() || !suffix.is_empty() {
+                    //             error!("Invalid arch type list. Improperly aligned");
+                    //             return Err(Error::Malformed);
+                    //         }
+                    //         system_arches = body
+                    //             .iter()
+                    //             .map(|&i| PxeArchType::try_from(u16::from_be(i)).unwrap())
+                    //             .collect();
+                    //     }
+
+                    //     if let DhcpOption::ClientMachineId(id) = option {
+                    //         client_uuid = Some(Uuid::from_slice(id.id).unwrap());
+                    //     }
+
+                    //     if let DhcpOption::VendorClassId(vendor) = option {
+                    //         vendor_id = Some(vendor.to_string());
+                    //     }
+
+                    //     if option == DhcpOption::EndOfList {
+                    //         break;
+                    //     }
+                    // }
+                }
+                Ok(())
+            })
+            .unwrap();
         // rx_token
         //     .consume(Instant::now(), |buffer| {
         //         let ether = EthernetFrame::new_checked(&buffer).unwrap();
