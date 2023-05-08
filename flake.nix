@@ -58,7 +58,7 @@
 
         checks = {
           pre-commit-check = nix-pre-commit-hooks.lib.${system}.run {
-            src = ./.;
+            src = buildDir;
             hooks = {
               nixpkgs-fmt.enable = true;
               rustfmt.enable = true;
