@@ -40,6 +40,7 @@
           name = "build";
           paths = [ self ];
           postBuild = ''
+            rm -rf $out/external/smoltcp
             ln -sf ${smoltcp} $out/external/smoltcp
           '';
         };
