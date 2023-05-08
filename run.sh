@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 set -euo pipefail
-
+ 
 set -x
 
 LAN=enp2s0
