@@ -76,7 +76,7 @@
           src = buildDir;
           cargoLock.lockFile = ./Cargo.lock;
           pname = "pxe-rs";
-          nativeBuildInputs = [ pkgs.breakpointHook ];
+          #nativeBuildInputs = [ pkgs.breakpointHook ];
           version = "0.1.0";
         };
 
