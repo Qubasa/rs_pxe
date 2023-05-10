@@ -100,5 +100,3 @@ pub fn parse_tuntap_options(matches: &mut Matches) -> TunTapInterface {
         _ => panic!("You must specify exactly one of --tun or --tap"),
     }
 }
-
-

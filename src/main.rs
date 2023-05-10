@@ -28,6 +28,8 @@ use std::os::unix::io::AsRawFd;
 use std::str::FromStr;
 use uuid::Uuid;
 
+use rs_pxe::*;
+
 const DEFAULT_MAC: &str = "2A-22-53-43-11-59";
 const DEFAULT_IP: &str = "10.33.99.1";
 //RFC: https://datatracker.ietf.org/doc/html/rfc2132
@@ -93,13 +95,6 @@ fn main() {
     };
 }
 
-#[derive(Debug)]
-struct PxeArchType {
-    arch_type: u16,
-    next_server: Ipv4Address,
-    boot_file: String,
-}
-
 pub fn server<DeviceT: AsRawFd>(device: &mut DeviceT, iface: &mut Interface)
 where
     DeviceT: for<'d> Device,
@@ -120,7 +115,7 @@ where
         phy_wait(fd, None).unwrap();
         let (rx_token, tx_token) = device.receive(time).unwrap();
         let mut client_uuid: Option<Uuid> = None;
-        let mut system_arches: Vec<PxeArchType> = vec![];
+        let mut system_arches: Vec<ClientArchType> = vec![];
         let mut vendor_id: Option<String> = None;
         let mut client_mac_address: Option<EthernetAddress> = None;
         let mut transaction_id: Option<u16> = None;

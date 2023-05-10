@@ -63,7 +63,6 @@
             hooks = {
               nixpkgs-fmt.enable = true;
               rustfmt.enable = true;
-              clippy.enable = true;
               shellcheck.enable = true;
             };
           };
