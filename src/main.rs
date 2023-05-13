@@ -3,7 +3,7 @@
 #![allow(unused_variables)]
 #![allow(unused_mut)]
 #![allow(dead_code)]
-mod utils;
+mod cli_opts;
 
 use log::*;
 use smoltcp::iface::Config;
@@ -16,10 +16,18 @@ use smoltcp::phy::RawSocket;
 use smoltcp::phy::RxToken;
 use smoltcp::phy::TxToken;
 use smoltcp::time::Instant;
+use smoltcp::wire::DhcpMessageType;
+use smoltcp::wire::DhcpPacket;
+use smoltcp::wire::EthernetAddress;
+use smoltcp::wire::EthernetFrame;
 use smoltcp::wire::HardwareAddress;
-use smoltcp::wire::*;
 
 use rand::prelude::*;
+use smoltcp::wire::IpAddress;
+use smoltcp::wire::IpCidr;
+use smoltcp::wire::Ipv4Address;
+use smoltcp::wire::Ipv4Packet;
+use smoltcp::wire::UdpPacket;
 use smoltcp::{iface::Interface, phy::ChecksumCapabilities};
 use std::borrow::BorrowMut;
 use std::collections::BTreeMap;
@@ -28,28 +36,22 @@ use std::os::unix::io::AsRawFd;
 use std::str::FromStr;
 use uuid::Uuid;
 
+use prelude::*;
 use rs_pxe::*;
 
-const DEFAULT_MAC: &str = "2A-22-53-43-11-59";
-const DEFAULT_IP: &str = "10.33.99.1";
 //RFC: https://datatracker.ietf.org/doc/html/rfc2132
 fn main() {
-    utils::setup_logging("");
+    cli_opts::setup_logging("");
     info!("Starting pxe....");
 
-    let (mut opts, mut _free) = utils::create_options();
-    opts.optopt("", "raw", "Interface to use", "enp2s0");
-    opts.optopt("", "tun", "TUN interface to use", "tun0");
-    opts.optopt("", "tap", "TAP interface to use", "tap0");
-    opts.optopt("", "ip", "Ip address to give the interface", DEFAULT_IP);
-    opts.optopt("", "mac", "Mac address to give the interface", DEFAULT_MAC);
+    let (mut opts, mut _free) = cli_opts::create_options();
 
-    let mut matches = utils::parse_options(&opts, _free);
-    let hardware_addr: &EthernetAddress = &matches
-        .opt_get_default("mac", EthernetAddress::from_str(DEFAULT_MAC).unwrap())
-        .unwrap();
+    let mut matches = cli_opts::parse_options(&opts, _free);
+    let t = &matches.opt_str("mac").unwrap();
+    let hardware_addr: &EthernetAddress = &EthernetAddress::from_str(t).unwrap();
+    let t = &matches.opt_str("ip").unwrap();
     let ip = &matches
-        .opt_get_default("ip", IpAddress::from_str(DEFAULT_IP).unwrap())
+        .opt_get_default("ip", IpAddress::from_str(t).unwrap())
         .unwrap();
     let ip_addrs = [IpCidr::new(*ip, 24)];
 
@@ -73,7 +75,7 @@ fn main() {
 
         server(&mut device, &mut iface);
     } else if matches.opt_present("tun") || matches.opt_present("tap") {
-        let mut device = utils::parse_tuntap_options(&mut matches);
+        let mut device = cli_opts::parse_tuntap_options(&mut matches);
 
         // Create interface
         let mut config = match device.capabilities().medium {
@@ -93,6 +95,101 @@ fn main() {
         let brief = "Either --raw or --tun or --tap must be specified";
         panic!("{}", opts.usage(brief));
     };
+}
+
+pub struct PxeClientInfo {
+    system_arches: Vec<ClientArchType>,
+}
+
+pub fn pxe_recv(buffer: &mut [u8]) -> Result<PxeClientInfo> {
+    let mut system_arches: Vec<ClientArchType> = vec![];
+
+    let ether = EthernetFrame::new_checked(&buffer).unwrap();
+
+    if ether.dst_addr() == EthernetAddress::BROADCAST {
+        log::info!("Received broadcast packet from {}", ether.src_addr());
+
+        let ipv4 = match Ipv4Packet::new_checked(ether.payload()) {
+            Ok(i) => i,
+            Err(e) => {
+                let err = format!("Parsing ipv4 packet failed: {}", e);
+                return Err(Error::InvalidPacket(err));
+            }
+        };
+
+        if ipv4.dst_addr() != Ipv4Address::BROADCAST {
+            return Err(Error::Ignore);
+        }
+
+        let udp = match UdpPacket::new_checked(ipv4.payload()) {
+            Ok(u) => u,
+            Err(e) => {
+                let err = format!("Parsing udp packet failed: {}", e);
+                return Err(Error::InvalidPacket(err));
+            }
+        };
+
+        if udp.dst_port() != 67 {
+            return Err(Error::Ignore);
+        }
+
+        let dhcp = match DhcpPacket::new_checked(udp.payload()) {
+            Ok(d) => d,
+            Err(e) => {
+                let err = format!("Parsing dhcp packet failed: {}", e);
+                return Err(Error::InvalidPacket(err));
+            }
+        };
+
+        if dhcp.opcode() != DhcpMessageType::Request.opcode() {
+            return Err(Error::Ignore);
+        }
+
+        let secs = dhcp.secs();
+        let mut next = dhcp.options();
+
+        for option in dhcp.options() {
+            if option.kind == crate::dhcp_options::DhcpOption::ClientSystemArchitecture as u8 {
+                // Client System Architecture
+                let (prefix, body, suffix) = unsafe { option.data.align_to::<u16>() };
+                if !prefix.is_empty() || !suffix.is_empty() {
+                    return Err(Error::Static("Invalid arch type list. Improperly aligned"));
+                }
+                system_arches = body
+                    .iter()
+                    .map(|&i| ClientArchType::try_from(u16::from_be(i)).unwrap())
+                    .collect();
+            }
+        }
+        // loop {
+        //     (next, option) = DhcpOption::parse(next).unwrap();
+
+        //     if let DhcpOption::ClientArchTypeList(data) = option {
+        //         let (prefix, body, suffix) = unsafe { data.align_to::<u16>() };
+        //         if !prefix.is_empty() || !suffix.is_empty() {
+        //             error!("Invalid arch type list. Improperly aligned");
+        //             return Err(Error::Malformed);
+        //         }
+        //         system_arches = body
+        //             .iter()
+        //             .map(|&i| PxeArchType::try_from(u16::from_be(i)).unwrap())
+        //             .collect();
+        //     }
+
+        //     if let DhcpOption::ClientMachineId(id) = option {
+        //         client_uuid = Some(Uuid::from_slice(id.id).unwrap());
+        //     }
+
+        //     if let DhcpOption::VendorClassId(vendor) = option {
+        //         vendor_id = Some(vendor.to_string());
+        //     }
+
+        //     if option == DhcpOption::EndOfList {
+        //         break;
+        //     }
+        // }
+    }
+    Ok(PxeClientInfo { system_arches })
 }
 
 pub fn server<DeviceT: AsRawFd>(device: &mut DeviceT, iface: &mut Interface)
@@ -120,100 +217,7 @@ where
         let mut client_mac_address: Option<EthernetAddress> = None;
         let mut transaction_id: Option<u16> = None;
         let mut secs = 0;
-        rx_token
-            .consume(|buffer| {
-                let ether = EthernetFrame::new_checked(&buffer).unwrap();
-
-                if ether.dst_addr() == EthernetAddress::BROADCAST {
-                    log::info!("Received broadcast packet from {}", ether.src_addr());
-
-                    let ipv4 = match Ipv4Packet::new_checked(ether.payload()) {
-                        Ok(i) => i,
-                        Err(e) => {
-                            error!("Parsing ipv4 packet failed: {}", e);
-                            return Ok::<(), Error>(());
-                        }
-                    };
-
-                    if ipv4.dst_addr() != Ipv4Address::BROADCAST {
-                        log::info!("Packet not for us, ignoring");
-                        return Ok::<(), Error>(());
-                    }
-
-                    let udp = match UdpPacket::new_checked(ipv4.payload()) {
-                        Ok(u) => u,
-                        Err(e) => {
-                            error!("Parsing udp packet failed: {}", e);
-                            return Ok::<(), Error>(());
-                        }
-                    };
-
-                    if udp.dst_port() != 67 {
-                        log::info!("Packet not for us, ignoring");
-                        return Ok::<(), Error>(());
-                    }
-
-                    let dhcp = match DhcpPacket::new_checked(udp.payload()) {
-                        Ok(d) => d,
-                        Err(e) => {
-                            error!("Parsing dhcp packet failed: {}", e);
-                            return Ok::<(), Error>(());
-                        }
-                    };
-
-                    if dhcp.opcode() != DhcpMessageType::Request.opcode() {
-                        log::info!("Packet not for us, ignoring");
-                        return Ok::<(), Error>(());
-                    }
-
-                    secs = dhcp.secs();
-                    let mut next = dhcp.options();
-
-                    for option in dhcp.options() {
-                        if option.kind == 93 {
-                            // Client System Architecture
-                            let (prefix, body, suffix) = unsafe { option.data.align_to::<u16>() };
-                            if !prefix.is_empty() || !suffix.is_empty() {
-                                error!("Invalid arch type list. Improperly aligned");
-                                return Err(Error);
-                            }
-                            // system_arches = body
-                            //             .iter()
-                            //             .map(|&i| PxeArchType::try_from(u16::from_be(i)).unwrap())
-                            //             .collect();
-                        }
-                    }
-                    // loop {
-                    //     (next, option) = DhcpOption::parse(next).unwrap();
-
-                    //     if let DhcpOption::ClientArchTypeList(data) = option {
-                    //         let (prefix, body, suffix) = unsafe { data.align_to::<u16>() };
-                    //         if !prefix.is_empty() || !suffix.is_empty() {
-                    //             error!("Invalid arch type list. Improperly aligned");
-                    //             return Err(Error::Malformed);
-                    //         }
-                    //         system_arches = body
-                    //             .iter()
-                    //             .map(|&i| PxeArchType::try_from(u16::from_be(i)).unwrap())
-                    //             .collect();
-                    //     }
-
-                    //     if let DhcpOption::ClientMachineId(id) = option {
-                    //         client_uuid = Some(Uuid::from_slice(id.id).unwrap());
-                    //     }
-
-                    //     if let DhcpOption::VendorClassId(vendor) = option {
-                    //         vendor_id = Some(vendor.to_string());
-                    //     }
-
-                    //     if option == DhcpOption::EndOfList {
-                    //         break;
-                    //     }
-                    // }
-                }
-                Ok(())
-            })
-            .unwrap();
+        rx_token.consume(pxe_recv).unwrap();
         // rx_token
         //     .consume(Instant::now(), |buffer| {
         //         let ether = EthernetFrame::new_checked(&buffer).unwrap();

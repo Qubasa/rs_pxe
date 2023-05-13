@@ -63,6 +63,21 @@ pub fn setup_logging(filter: &str) {
 pub fn create_options() -> (Options, Vec<&'static str>) {
     let mut opts = Options::new();
     opts.optflag("h", "help", "print this help menu");
+    opts.optopt("", "raw", "Interface to use", "enp2s0");
+    opts.optopt("", "tun", "TUN interface to use", "tun0");
+    opts.optopt("", "tap", "TAP interface to use", "tap0");
+    opts.optopt(
+        "",
+        "ip",
+        "Ip address to give the interface",
+        "192.168.100.15",
+    );
+    opts.optopt(
+        "",
+        "mac",
+        "Mac address to give the interface",
+        "2A-22-53-43-11-59",
+    );
     (opts, Vec::new())
 }
 

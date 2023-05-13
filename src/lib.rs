@@ -1,7 +1,10 @@
 #![allow(dead_code)]
 
-use smoltcp::wire::Error;
-
+pub mod dhcp_options;
+pub mod error;
+pub mod prelude;
+use crate::error::Error;
+use crate::prelude::*;
 /// The possible system architecture types
 #[repr(u16)]
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -55,7 +58,7 @@ pub enum ClientArchType {
 impl TryFrom<u16> for ClientArchType {
     type Error = Error;
 
-    fn try_from(value: u16) -> Result<Self, Error> {
+    fn try_from(value: u16) -> Result<Self> {
         use ClientArchType::*;
         let res = match value {
             0 => X86Bios,
@@ -100,7 +103,7 @@ impl TryFrom<u16> for ClientArchType {
             39 => LoongArch64Uefi,
             40 => LoongArch64UefiHttp,
             41 => ArmRpiBoot,
-            _ => return Err(Error),
+            e => return Err(Error::UnknownDhcpValue(e.into())),
         };
         Ok(res)
     }
@@ -117,10 +120,10 @@ pub enum NetworkInterfaceType {
 impl TryFrom<u8> for NetworkInterfaceType {
     type Error = Error;
 
-    fn try_from(value: u8) -> Result<Self, Error> {
+    fn try_from(value: u8) -> Result<Self> {
         match value {
             1 => Ok(NetworkInterfaceType::Undi),
-            _ => Err(Error),
+            e => Err(Error::UnknownDhcpValue(e.into())),
         }
     }
 }
@@ -144,10 +147,10 @@ pub enum MachineIdType {
 impl TryFrom<u8> for MachineIdType {
     type Error = Error;
 
-    fn try_from(value: u8) -> Result<Self, Error> {
+    fn try_from(value: u8) -> Result<Self> {
         match value {
             0 => Ok(MachineIdType::Guid),
-            _ => Err(Error),
+            e => Err(Error::UnknownDhcpValue(e.into())),
         }
     }
 }

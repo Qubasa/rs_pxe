@@ -346,6 +346,7 @@ dependencies = [
  "log",
  "rand",
  "smoltcp",
+ "thiserror",
  "uuid",
 ]
 

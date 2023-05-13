@@ -53,6 +53,7 @@
         runtimeDeps = with pkgs; [
           qemu
           cargo-watch
+          rust-analyzer-nightly
         ];
       in
       rec {
@@ -90,6 +91,7 @@
           RUST_SRC_PATH = rustPlatform.rustLibSrc;
           shellHook = ''
             export PATH=$PATH:~/.cargo/bin
+            export RUST_ANALYZER=${pkgs.rust-analyzer-nightly}/bin/rust-analyzer
             ${self.checks.${system}.pre-commit-check.shellHook}
           '';
         };
