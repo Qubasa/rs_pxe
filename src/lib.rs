@@ -136,6 +136,24 @@ pub struct NetworkInterfaceVersion {
     pub minor: u8,
 }
 
+impl TryFrom<&[u8]> for NetworkInterfaceVersion {
+    type Error = Error;
+
+    fn try_from(value: &[u8]) -> Result<Self> {
+        let array = <&[u8; 4]>::try_from(value)?;
+
+        let interface_type = NetworkInterfaceType::try_from(array[2])?;
+        let minor = array[0];
+        let major = array[1];
+
+        Ok(NetworkInterfaceVersion {
+            interface_type,
+            major,
+            minor,
+        })
+    }
+}
+
 #[repr(u8)]
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]

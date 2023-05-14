@@ -10,12 +10,18 @@ pub enum Error {
     #[error(transparent)]
     IO(#[from] std::io::Error),
 
+    #[error(transparent)]
+    TryFromSlice(#[from] std::array::TryFromSliceError),
+
     #[error("Unknown DHCP value")]
     UnknownDhcpValue(u64),
 
+    #[error("Missing DHCP option")]
+    MissingDhcpOption,
+
     #[error("Invalid Packet: {0}")]
-    InvalidPacket(String),
+    Malformed(String),
 
     #[error("Ignore")]
-    Ignore,
+    Ignore(String),
 }
