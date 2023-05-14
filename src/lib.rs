@@ -2,6 +2,7 @@
 
 pub mod dhcp_options;
 pub mod error;
+pub mod parse;
 pub mod prelude;
 use crate::error::Error;
 use crate::prelude::*;
