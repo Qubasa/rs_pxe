@@ -1,35 +1,19 @@
 use log::*;
-use smoltcp::iface::Config;
-use smoltcp::iface::Routes;
-use smoltcp::phy::wait as phy_wait;
-use smoltcp::phy::Checksum;
-use smoltcp::phy::Device;
-use smoltcp::phy::Medium;
-use smoltcp::phy::RawSocket;
-use smoltcp::phy::RxToken;
-use smoltcp::phy::TxToken;
-use smoltcp::time::Instant;
+
 use smoltcp::wire::DhcpMessageType;
 use smoltcp::wire::DhcpPacket;
 use smoltcp::wire::EthernetAddress;
 use smoltcp::wire::EthernetFrame;
-use smoltcp::wire::HardwareAddress;
 
 use crate::dhcp_options::DhcpOption;
 use crate::{prelude::*, *};
-use rand::prelude::*;
-use smoltcp::wire::IpAddress;
-use smoltcp::wire::IpCidr;
+
 use smoltcp::wire::Ipv4Address;
 use smoltcp::wire::Ipv4Packet;
 use smoltcp::wire::UdpPacket;
-use smoltcp::{iface::Interface, phy::ChecksumCapabilities};
-use std::borrow::BorrowMut;
-use std::collections::BTreeMap;
+
 use std::convert::TryFrom;
-use std::io::Read;
-use std::os::unix::io::AsRawFd;
-use std::str::FromStr;
+
 use uuid::Uuid;
 
 pub struct PxeClientInfo {
@@ -116,7 +100,7 @@ pub fn pxe_recv(buffer: &mut [u8]) -> Result<PxeClientInfo> {
                 }
                 DhcpOption::ClientUuid => {
                     // Client Machine ID
-                    let uuid = Uuid::from_slice(option.data)
+                    let _uuid = Uuid::from_slice(option.data)
                         .map_err(|e| Error::Malformed(f!("Invalid UUID: {}", e)))?;
                 }
                 DhcpOption::VendorClassIdentifier => {
