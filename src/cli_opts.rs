@@ -50,7 +50,7 @@ where
                 )
             }
         })
-        .filter(None, LevelFilter::Trace)
+        .filter(None, LevelFilter::Debug)
         .parse_env(filter)
         .parse_env(&env::var("RUST_LOG").unwrap_or_else(|_| "".to_owned()))
         .init();

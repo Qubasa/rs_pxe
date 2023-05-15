@@ -118,25 +118,23 @@ where
         let time = Instant::now();
         phy_wait(fd, None).unwrap();
         let (rx_token, tx_token) = device.receive(time).unwrap();
-        let mut client_uuid: Option<Uuid> = None;
-        let mut system_arches: Vec<ClientArchType> = vec![];
-        let mut vendor_id: Option<String> = None;
-        let mut client_mac_address: Option<EthernetAddress> = None;
-        let mut transaction_id: Option<u16> = None;
-        let mut secs = 0;
-        rx_token
-            .consume(|buffer| {
-                let dhcp = rs_pxe::ether_to_dhcp(buffer)?;
-                rs_pxe::parse::pxe_discover(dhcp)
-            })
-            .map_err(|e| match e {
-                Error::Ignore(e) => {
-                    debug!("Ignored packet. Reason: {}", e);
-                    Ok(())
-                }
-                e => Err(e),
-            })
-            .unwrap();
+        let info = match rx_token.consume(|buffer| {
+            let dhcp = rs_pxe::ether_to_dhcp(buffer)?;
+            let info = rs_pxe::parse::pxe_discover(dhcp)?;
+
+            if info.msg_type != DhcpMessageType::Discover {
+                return Err(Error::Ignore("Not a dhcp discover packet".to_string()));
+            }
+            Ok(info)
+        }) {
+            Ok(info) => info,
+            Err(Error::Ignore(e)) => {
+                trace!("Ignoring packet. Reason: {}", e);
+                continue;
+            }
+            Err(e) => panic!("Error: {}", e),
+        };
+
         // rx_token
         //     .consume(Instant::now(), |buffer| {
         //         let ether = EthernetFrame::new_checked(&buffer).unwrap();
@@ -230,85 +228,79 @@ where
         // let mut vendor_id: Option<String> = Some("asdasdasd".to_string());
         // let mut client_mac_address = Some(EthernetAddress::from_str(DEFAULT_MAC).unwrap());
         // let mut transaction_id = Some(0x12345);
-        if let Some(client_mac_address) = client_mac_address {
-            info!("Client mac address: {}", client_mac_address);
-            info!("Supported system arches: {:#?}", system_arches);
-            info!("Client guid: {}", client_uuid.unwrap().hyphenated());
-            info!("Client vendor id: {}", vendor_id.unwrap());
 
-            //     tx_token
-            //         .consume(Instant::now(), 300, |buffer| {
-            //             const IP_NULL: Ipv4Address = Ipv4Address([0, 0, 0, 0]);
-            //             let dhcp_packet = DhcpRepr {
-            //                 message_type: DhcpMessageType::Offer,
-            //                 transaction_id: transaction_id.unwrap(),
-            //                 client_hardware_address: client_mac_address,
-            //                 secs: secs,
-            //                 client_ip: IP_NULL,
-            //                 your_ip: IP_NULL,
-            //                 server_ip: IP_NULL,
-            //                 broadcast: true,
-            //                 sname: None,
-            //                 boot_file: None,
-            //                 relay_agent_ip: IP_NULL,
+        //     tx_token
+        //         .consume(Instant::now(), 300, |buffer| {
+        //             const IP_NULL: Ipv4Address = Ipv4Address([0, 0, 0, 0]);
+        //             let dhcp_packet = DhcpRepr {
+        //                 message_type: DhcpMessageType::Offer,
+        //                 transaction_id: transaction_id.unwrap(),
+        //                 client_hardware_address: client_mac_address,
+        //                 secs: secs,
+        //                 client_ip: IP_NULL,
+        //                 your_ip: IP_NULL,
+        //                 server_ip: IP_NULL,
+        //                 broadcast: true,
+        //                 sname: None,
+        //                 boot_file: None,
+        //                 relay_agent_ip: IP_NULL,
 
-            //                 // unimportant
-            //                 router: None,
-            //                 subnet_mask: None,
-            //                 requested_ip: None,
-            //                 client_identifier: None,
-            //                 server_identifier: None,
-            //                 parameter_request_list: None,
-            //                 dns_servers: None,
-            //                 max_size: None,
-            //                 lease_duration: None,
-            //                 client_arch_list: None,
-            //                 client_interface_id: None,
-            //                 client_machine_id: None,
-            //                 time_offset: None,
-            //                 vendor_class_id: None,
-            //             };
+        //                 // unimportant
+        //                 router: None,
+        //                 subnet_mask: None,
+        //                 requested_ip: None,
+        //                 client_identifier: None,
+        //                 server_identifier: None,
+        //                 parameter_request_list: None,
+        //                 dns_servers: None,
+        //                 max_size: None,
+        //                 lease_duration: None,
+        //                 client_arch_list: None,
+        //                 client_interface_id: None,
+        //                 client_machine_id: None,
+        //                 time_offset: None,
+        //                 vendor_class_id: None,
+        //             };
 
-            //             let udp_packet = UdpRepr {
-            //                 src_port: 67,
-            //                 dst_port: 68,
-            //             };
+        //             let udp_packet = UdpRepr {
+        //                 src_port: 67,
+        //                 dst_port: 68,
+        //             };
 
-            //             let mut packet = EthernetFrame::new_unchecked(buffer);
-            //             let eth_packet = EthernetRepr {
-            //                 dst_addr: EthernetAddress::BROADCAST,
-            //                 src_addr: server_mac_address,
-            //                 ethertype: EthernetProtocol::Ipv4,
-            //             };
-            //             eth_packet.emit(&mut packet);
+        //             let mut packet = EthernetFrame::new_unchecked(buffer);
+        //             let eth_packet = EthernetRepr {
+        //                 dst_addr: EthernetAddress::BROADCAST,
+        //                 src_addr: server_mac_address,
+        //                 ethertype: EthernetProtocol::Ipv4,
+        //             };
+        //             eth_packet.emit(&mut packet);
 
-            //             let mut packet = Ipv4Packet::new_unchecked(packet.payload_mut());
-            //             let ip_packet = Ipv4Repr {
-            //                 src_addr: server_ip,
-            //                 dst_addr: Ipv4Address::BROADCAST,
-            //                 protocol: IpProtocol::Udp,
-            //                 hop_limit: 128,
-            //                 payload_len: dhcp_packet.buffer_len() + udp_packet.header_len(),
-            //             };
-            //             ip_packet.emit(&mut packet, &checksum);
+        //             let mut packet = Ipv4Packet::new_unchecked(packet.payload_mut());
+        //             let ip_packet = Ipv4Repr {
+        //                 src_addr: server_ip,
+        //                 dst_addr: Ipv4Address::BROADCAST,
+        //                 protocol: IpProtocol::Udp,
+        //                 hop_limit: 128,
+        //                 payload_len: dhcp_packet.buffer_len() + udp_packet.header_len(),
+        //             };
+        //             ip_packet.emit(&mut packet, &checksum);
 
-            //             let mut packet = UdpPacket::new_unchecked(packet.payload_mut());
-            //             udp_packet.emit(
-            //                 &mut packet,
-            //                 &server_ip.into(),
-            //                 &Ipv4Address::BROADCAST.into(),
-            //                 dhcp_packet.buffer_len(),
-            //                 |buf| {
-            //                     let mut packet = DhcpPacket::new_unchecked(buf);
-            //                     dhcp_packet.emit(&mut packet).unwrap();
-            //                 },
-            //                 &checksum,
-            //             );
+        //             let mut packet = UdpPacket::new_unchecked(packet.payload_mut());
+        //             udp_packet.emit(
+        //                 &mut packet,
+        //                 &server_ip.into(),
+        //                 &Ipv4Address::BROADCAST.into(),
+        //                 dhcp_packet.buffer_len(),
+        //                 |buf| {
+        //                     let mut packet = DhcpPacket::new_unchecked(buf);
+        //                     dhcp_packet.emit(&mut packet).unwrap();
+        //                 },
+        //                 &checksum,
+        //             );
 
-            //             info!("Sending DHCP offer...");
-            //             Ok(())
-            //         })
-            //         .unwrap();
-        }
+        //             info!("Sending DHCP offer...");
+        //             Ok(())
+        //         })
+        //         .unwrap();
     }
 }

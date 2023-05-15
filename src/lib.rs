@@ -5,28 +5,21 @@ pub mod error;
 pub mod parse;
 pub mod prelude;
 
-use smoltcp::wire::DhcpMessageType;
 use smoltcp::wire::DhcpPacket;
 use smoltcp::wire::EthernetAddress;
 use smoltcp::wire::EthernetFrame;
 
-use crate::dhcp_options::*;
 use crate::prelude::*;
 
 use smoltcp::wire::Ipv4Address;
 use smoltcp::wire::Ipv4Packet;
 use smoltcp::wire::UdpPacket;
 
-use std::convert::TryFrom;
-
-use uuid::Uuid;
-
 pub fn ether_to_dhcp(buffer: &[u8]) -> Result<DhcpPacket<&[u8]>> {
     let ether = EthernetFrame::new_checked(buffer).unwrap();
     if ether.dst_addr() != EthernetAddress::BROADCAST {
         return Err(Error::Ignore("Not a broadcast packet".to_string()));
     }
-    log::info!("Received broadcast packet from {}", ether.src_addr());
 
     let ipv4 = match Ipv4Packet::new_checked(ether.payload()) {
         Ok(i) => i,

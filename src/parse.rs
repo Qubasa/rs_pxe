@@ -12,12 +12,12 @@ use uuid::Uuid;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct PxeClientInfo {
-    client_arch: ClientArchType,
-    vendor_id: Option<String>,
-    client_uuid: Uuid,
-    msg_type: DhcpMessageType,
-    network_interface_version: NetworkInterfaceVersion,
-    client_identifier: ClientIdentifier,
+    pub client_arch: ClientArchType,
+    pub vendor_id: Option<String>,
+    pub client_uuid: Uuid,
+    pub msg_type: DhcpMessageType,
+    pub network_interface_version: NetworkInterfaceVersion,
+    pub client_identifier: ClientIdentifier,
 }
 
 pub fn pxe_discover(dhcp: DhcpPacket<&[u8]>) -> Result<PxeClientInfo> {
