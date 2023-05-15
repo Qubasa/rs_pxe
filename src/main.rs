@@ -37,7 +37,7 @@ use std::os::unix::io::AsRawFd;
 use std::str::FromStr;
 use uuid::Uuid;
 
-use crate::dhcp_options::DhcpOption;
+use crate::dhcp_options::*;
 use prelude::*;
 use rs_pxe::*;
 
@@ -125,7 +125,10 @@ where
         let mut transaction_id: Option<u16> = None;
         let mut secs = 0;
         rx_token
-            .consume(rs_pxe::parse::pxe_recv)
+            .consume(|buffer| {
+                let dhcp = rs_pxe::ether_to_dhcp(buffer)?;
+                rs_pxe::parse::pxe_discover(dhcp)
+            })
             .map_err(|e| match e {
                 Error::Ignore(e) => {
                     debug!("Ignored packet. Reason: {}", e);
