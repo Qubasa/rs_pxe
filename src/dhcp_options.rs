@@ -1,3 +1,9 @@
+use std::fmt::{self, Display, Formatter};
+
+use ouroboros::self_referencing;
+use smoltcp::wire::{DhcpOption, EthernetAddress};
+use uuid::Uuid;
+
 use crate::error::Error;
 
 use crate::prelude::*;
@@ -5,7 +11,7 @@ use crate::prelude::*;
 #[repr(u8)]
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
-pub enum DhcpOption {
+pub enum PxeDhcpOption {
     ClientUuid = 97,
     ClientIdentifier = 61,
     ClientNetworkInterfaceIdentifier = 94,
@@ -31,34 +37,40 @@ pub enum DhcpOption {
     PxeBootItems = 71,
     End = 255,
 }
-impl TryFrom<u8> for DhcpOption {
+impl From<PxeDhcpOption> for u8 {
+    fn from(val: PxeDhcpOption) -> Self {
+        val as u8
+    }
+}
+
+impl TryFrom<u8> for PxeDhcpOption {
     type Error = Error;
     fn try_from(value: u8) -> Result<Self> {
         match value {
-            97 => Ok(DhcpOption::ClientUuid),
-            61 => Ok(DhcpOption::ClientIdentifier),
-            94 => Ok(DhcpOption::ClientNetworkInterfaceIdentifier),
-            93 => Ok(DhcpOption::ClientSystemArchitecture),
-            55 => Ok(DhcpOption::ParameterRequestList),
-            60 => Ok(DhcpOption::VendorClassIdentifier),
-            43 => Ok(DhcpOption::VendorOptions),
-            53 => Ok(DhcpOption::MessageType),
-            54 => Ok(DhcpOption::ServerIdentifier),
-            57 => Ok(DhcpOption::MaximumMessageSize),
-            1 => Ok(DhcpOption::PxeMtftpIp),
-            2 => Ok(DhcpOption::PxeMtftpCport),
-            3 => Ok(DhcpOption::PxeMtftpSport),
-            4 => Ok(DhcpOption::PxeMtftpTimeout),
-            5 => Ok(DhcpOption::PxeMtftpDelay),
-            6 => Ok(DhcpOption::PxeDiscoverControl),
-            7 => Ok(DhcpOption::DisoveryMcastAddr),
-            8 => Ok(DhcpOption::PxeBootServers),
-            9 => Ok(DhcpOption::PxeBootMenu),
-            10 => Ok(DhcpOption::PxeMenuPrompt),
-            11 => Ok(DhcpOption::PxeMcastAddr),
-            12 => Ok(DhcpOption::PxeCredentailTypes),
-            71 => Ok(DhcpOption::PxeBootItems),
-            255 => Ok(DhcpOption::End),
+            97 => Ok(PxeDhcpOption::ClientUuid),
+            61 => Ok(PxeDhcpOption::ClientIdentifier),
+            94 => Ok(PxeDhcpOption::ClientNetworkInterfaceIdentifier),
+            93 => Ok(PxeDhcpOption::ClientSystemArchitecture),
+            55 => Ok(PxeDhcpOption::ParameterRequestList),
+            60 => Ok(PxeDhcpOption::VendorClassIdentifier),
+            43 => Ok(PxeDhcpOption::VendorOptions),
+            53 => Ok(PxeDhcpOption::MessageType),
+            54 => Ok(PxeDhcpOption::ServerIdentifier),
+            57 => Ok(PxeDhcpOption::MaximumMessageSize),
+            1 => Ok(PxeDhcpOption::PxeMtftpIp),
+            2 => Ok(PxeDhcpOption::PxeMtftpCport),
+            3 => Ok(PxeDhcpOption::PxeMtftpSport),
+            4 => Ok(PxeDhcpOption::PxeMtftpTimeout),
+            5 => Ok(PxeDhcpOption::PxeMtftpDelay),
+            6 => Ok(PxeDhcpOption::PxeDiscoverControl),
+            7 => Ok(PxeDhcpOption::DisoveryMcastAddr),
+            8 => Ok(PxeDhcpOption::PxeBootServers),
+            9 => Ok(PxeDhcpOption::PxeBootMenu),
+            10 => Ok(PxeDhcpOption::PxeMenuPrompt),
+            11 => Ok(PxeDhcpOption::PxeMcastAddr),
+            12 => Ok(PxeDhcpOption::PxeCredentailTypes),
+            71 => Ok(PxeDhcpOption::PxeBootItems),
+            255 => Ok(PxeDhcpOption::End),
             e => Err(Error::UnknownDhcpValue(e.into())),
         }
     }
@@ -170,6 +182,12 @@ impl TryFrom<&[u8]> for ClientArchType {
     }
 }
 
+impl From<ClientArchType> for u16 {
+    fn from(value: ClientArchType) -> Self {
+        value as u16
+    }
+}
+
 #[repr(u8)]
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
@@ -186,6 +204,12 @@ impl TryFrom<u8> for NetworkInterfaceType {
             1 => Ok(NetworkInterfaceType::Undi),
             e => Err(Error::UnknownDhcpValue(e.into())),
         }
+    }
+}
+
+impl From<NetworkInterfaceType> for u8 {
+    fn from(value: NetworkInterfaceType) -> Self {
+        value as u8
     }
 }
 
@@ -218,11 +242,6 @@ pub enum HardwareType {
     DomainName = 0,
     Ethernet = 1,
 }
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub struct ClientIdentifier {
-    pub hardware_type: HardwareType,
-    pub hardware_address: Vec<u8>,
-}
 
 impl TryFrom<u8> for HardwareType {
     type Error = Error;
@@ -232,6 +251,34 @@ impl TryFrom<u8> for HardwareType {
             0 => Ok(HardwareType::DomainName),
             1 => Ok(HardwareType::Ethernet),
             e => Err(Error::UnknownDhcpValue(e.into())),
+        }
+    }
+}
+
+impl From<HardwareType> for u8 {
+    fn from(val: HardwareType) -> Self {
+        val as u8
+    }
+}
+
+// Identifiers SHOULD be treated as opaque objects by DHCP servers.
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct ClientIdentifier {
+    pub hardware_type: HardwareType,
+    pub hardware_address: Vec<u8>,
+}
+
+impl Display for ClientIdentifier {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self.hardware_type {
+            HardwareType::DomainName => {
+                let domain_name = String::from_utf8_lossy(&self.hardware_address);
+                write!(f, "{}", domain_name)
+            }
+            HardwareType::Ethernet => {
+                let mac = EthernetAddress::from_bytes(&self.hardware_address);
+                write!(f, "{}", mac)
+            }
         }
     }
 }
@@ -246,5 +293,105 @@ impl TryFrom<&[u8]> for ClientIdentifier {
             hardware_type,
             hardware_address,
         })
+    }
+}
+
+impl From<ClientIdentifier> for Vec<u8> {
+    fn from(val: ClientIdentifier) -> Self {
+        let mut res = Vec::new();
+        res.push(val.hardware_type.into());
+        res.extend_from_slice(&val.hardware_address);
+        res
+    }
+}
+
+#[self_referencing]
+#[derive(Debug, PartialEq, Eq)]
+pub struct DhcpOptionWrapper {
+    mdata: Vec<u8>,
+
+    #[borrows(mdata)]
+    #[covariant]
+    option: DhcpOption<'this>,
+}
+
+impl<'a> From<&'a DhcpOptionWrapper> for DhcpOption<'a> {
+    fn from(val: &'a DhcpOptionWrapper) -> Self {
+        *val.borrow_option()
+    }
+}
+
+impl From<ClientIdentifier> for DhcpOptionWrapper {
+    fn from(val: ClientIdentifier) -> Self {
+        let mut res: Vec<u8> = Vec::new();
+        res.push(val.hardware_type.into());
+        res.extend_from_slice(&val.hardware_address);
+        DhcpOptionWrapperBuilder {
+            mdata: res,
+            option_builder: |data| {
+                let kind = data[0];
+                let data = &data[1..];
+                DhcpOption { kind, data }
+            },
+        }
+        .build()
+    }
+}
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct PxeUuid {
+    pub uuid: Uuid,
+}
+
+impl TryFrom<&[u8]> for PxeUuid {
+    type Error = Error;
+
+    fn try_from(value: &[u8]) -> Result<Self> {
+        let uuid = Uuid::from_slice(value)
+            .map_err(|_| Error::Malformed("UUID is malformed".to_string()))?;
+        Ok(PxeUuid { uuid })
+    }
+}
+
+impl From<PxeUuid> for DhcpOptionWrapper {
+    fn from(val: PxeUuid) -> Self {
+        DhcpOptionWrapperBuilder {
+            mdata: val.uuid.as_bytes().to_vec(),
+            option_builder: |data| {
+                let kind = PxeDhcpOption::ClientUuid.into();
+                let data = &data;
+                DhcpOption { kind, data }
+            },
+        }
+        .build()
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct VendorClassIdentifier {
+    pub data: String,
+}
+
+impl TryFrom<&[u8]> for VendorClassIdentifier {
+    type Error = Error;
+
+    fn try_from(value: &[u8]) -> Result<Self> {
+        let data = String::from_utf8_lossy(value);
+        Ok(VendorClassIdentifier {
+            data: data.to_string(),
+        })
+    }
+}
+
+impl From<VendorClassIdentifier> for DhcpOptionWrapper {
+    fn from(val: VendorClassIdentifier) -> Self {
+        DhcpOptionWrapperBuilder {
+            mdata: val.data.as_bytes().to_vec(),
+            option_builder: |data| {
+                let kind = PxeDhcpOption::VendorClassIdentifier.into();
+                let data = data;
+                DhcpOption { kind, data }
+            },
+        }
+        .build()
     }
 }

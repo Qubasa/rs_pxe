@@ -8,24 +8,25 @@ use crate::prelude::*;
 
 use std::convert::TryFrom;
 
-use uuid::Uuid;
-
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct PxeClientInfo {
     pub client_arch: ClientArchType,
-    pub vendor_id: Option<String>,
-    pub client_uuid: Uuid,
+    /// Optionally identify the vendor type and configuration of a DHCP client
+    pub vendor_id: Option<VendorClassIdentifier>,
+    pub client_uuid: PxeUuid,
     pub msg_type: DhcpMessageType,
     pub network_interface_version: NetworkInterfaceVersion,
     pub client_identifier: ClientIdentifier,
+    pub transaction_id: u32,
+    pub secs: u16,
 }
 
 pub fn pxe_discover(dhcp: DhcpPacket<&[u8]>) -> Result<PxeClientInfo> {
     let mut client_arch: Option<ClientArchType> = None;
-    let mut vendor_id: Option<String> = None;
+    let mut vendor_id: Option<VendorClassIdentifier> = None;
     let mut msg_type: Option<DhcpMessageType> = None;
     let mut network_interface_version: Option<NetworkInterfaceVersion> = None;
-    let mut client_uuid: Option<Uuid> = None;
+    let mut client_uuid: Option<PxeUuid> = None;
     let mut client_identifier: Option<ClientIdentifier> = None;
 
     if dhcp.opcode() != DhcpMessageType::Request.opcode() {
@@ -33,47 +34,55 @@ pub fn pxe_discover(dhcp: DhcpPacket<&[u8]>) -> Result<PxeClientInfo> {
     }
 
     for option in dhcp.options() {
-        if let Ok(opt_kind) = DhcpOption::try_from(option.kind) {
+        if let Ok(opt_kind) = PxeDhcpOption::try_from(option.kind) {
             match opt_kind {
-                DhcpOption::MessageType => {
+                PxeDhcpOption::MessageType => {
                     // Message Type
                     let mtype = DhcpMessageType::try_from(option.data[0])
                         .map_err(|e| Error::Malformed(f!("Invalid message type: {}", e)))?;
                     msg_type = Some(mtype);
                 }
-                DhcpOption::ClientSystemArchitecture => {
+                PxeDhcpOption::ClientSystemArchitecture => {
                     let t = ClientArchType::try_from(option.data)?;
                     client_arch = Some(t);
                 }
-                DhcpOption::ClientNetworkInterfaceIdentifier => {
+                PxeDhcpOption::ClientNetworkInterfaceIdentifier => {
                     let t = NetworkInterfaceVersion::try_from(option.data).map_err(|e| {
                         Error::Malformed(f!("Invalid network interface version: {}", e))
                     })?;
 
                     network_interface_version = Some(t);
                 }
-                DhcpOption::ClientUuid => {
-                    let t = Uuid::from_slice(&option.data[1..])
-                        .map_err(|e| Error::Malformed(f!("Invalid UUID: {}", e)))?;
+                PxeDhcpOption::ClientUuid => {
+                    let t = PxeUuid::try_from(option.data)?;
                     client_uuid = Some(t);
                 }
-                DhcpOption::VendorClassIdentifier => {
-                    let s = String::from_utf8(option.data.to_vec())
-                        .map_err(|e| Error::Malformed(f!("Invalid class identifier: {}", e)))?;
-
+                PxeDhcpOption::VendorClassIdentifier => {
+                    let s = VendorClassIdentifier::try_from(option.data)?;
                     vendor_id = Some(s);
                 }
-                DhcpOption::ClientIdentifier => {
+                PxeDhcpOption::ClientIdentifier => {
                     let t = ClientIdentifier::try_from(option.data)
                         .map_err(|e| Error::Malformed(f!("Invalid client identifier: {}", e)))?;
                     client_identifier = Some(t);
                 }
-
+                PxeDhcpOption::ParameterRequestList | PxeDhcpOption::MaximumMessageSize => {
+                    // Ignore
+                }
                 _ => {
                     warn!("Unhandled PXE option: {:?}", opt_kind)
                 }
             }
         }
+    }
+
+    // If the client identifier option is not present, use the hardware address from the DHCP packet
+    if client_identifier.is_none() {
+        let id = ClientIdentifier {
+            hardware_type: HardwareType::Ethernet,
+            hardware_address: dhcp.client_hardware_address().as_bytes().to_vec(),
+        };
+        client_identifier = Some(id);
     }
 
     Ok(PxeClientInfo {
@@ -83,11 +92,15 @@ pub fn pxe_discover(dhcp: DhcpPacket<&[u8]>) -> Result<PxeClientInfo> {
         client_uuid: client_uuid.ok_or(Error::MissingDhcpOption)?,
         msg_type: msg_type.ok_or(Error::MissingDhcpOption)?,
         network_interface_version: network_interface_version.ok_or(Error::MissingDhcpOption)?,
+        transaction_id: dhcp.transaction_id(),
+        secs: dhcp.secs(),
     })
 }
 
 #[cfg(test)]
 mod test {
+    use uuid::Uuid;
+
     use super::*;
     static PXE_DISCOVER: &[u8] = &[
         0x01, 0x01, 0x06, 0x00, 0x43, 0x31, 0xaf, 0x13, 0x00, 0x04, 0x80, 0x00, 0x00, 0x00, 0x00,
@@ -132,7 +145,9 @@ mod test {
 
         assert_eq!(
             info.vendor_id,
-            Some("PXEClient:Arch:00000:UNDI:002001".to_string())
+            Some(VendorClassIdentifier {
+                data: "PXEClient:Arch:00000:UNDI:002001".to_string()
+            })
         );
         assert_eq!(info.client_arch, ClientArchType::X86Bios);
         assert_eq!(info.msg_type, DhcpMessageType::Discover);
@@ -141,7 +156,12 @@ mod test {
             vec![0x52, 0x54, 0x00, 0x12, 0x34, 0x56]
         );
         assert_eq!(info.client_identifier.hardware_type, HardwareType::Ethernet);
-        assert_eq!(info.client_uuid, Uuid::from_bytes([0x00; 16]));
+        assert_eq!(
+            info.client_uuid,
+            PxeUuid {
+                uuid: Uuid::from_bytes([0x00; 16])
+            }
+        );
     }
 
     static PXE_OFFER: &[u8] = &[

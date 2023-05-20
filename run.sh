@@ -10,6 +10,7 @@ TAPIF=kmania_tap0
 
 
 function reset_net {
+  sudo dhcpcd -k $BRIDGE
   sudo ip link set "$TAPIF" down
   sudo ip link set $BRIDGE down
   sudo brctl delif $BRIDGE "$TAPIF"
@@ -29,6 +30,7 @@ function setup_net {
   sudo ip link set $BRIDGE up
   sudo ip link set $LAN up
   sudo ip link set "$TAPIF" up
+  sudo dhcpcd -n $BRIDGE
 }
 
 trap ctrl_c INT
@@ -40,7 +42,7 @@ export RUST_BACKTRACE=1
 pkill rs_pxe || true
 cargo build
 sudo setcap cap_net_admin,cap_net_raw=eip ./target/debug/rs_pxe
-./target/debug/rs_pxe --raw "$LAN" --mac "2A-22-53-43-11-59" --ip "192.168.178.254" &
+#./target/debug/rs_pxe --raw "$LAN" --mac "2A-22-53-43-11-59" --ip "192.168.178.254" &
 qemu-system-x86_64 -enable-kvm -m 1024 -net nic -net tap,ifname="$TAPIF",script=no,downscript=no -cdrom ipxe.iso -serial stdio -display none 
 EOF
 )

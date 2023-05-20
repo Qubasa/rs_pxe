@@ -54,6 +54,8 @@
           qemu
           cargo-watch
           rust-analyzer-nightly
+          pixiecore
+          dhcpcd
         ];
       in
       rec {

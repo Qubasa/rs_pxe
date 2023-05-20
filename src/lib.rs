@@ -1,9 +1,11 @@
 #![allow(dead_code)]
 
+pub mod construct;
 pub mod dhcp_options;
 pub mod error;
 pub mod parse;
 pub mod prelude;
+mod utils;
 
 use smoltcp::wire::DhcpPacket;
 use smoltcp::wire::EthernetAddress;
@@ -54,3 +56,42 @@ pub fn ether_to_dhcp(buffer: &[u8]) -> Result<DhcpPacket<&[u8]>> {
     };
     Ok(dhcp)
 }
+
+// let udp_packet = UdpRepr {
+//     src_port: 67,
+//     dst_port: 68,
+// };
+
+// let mut packet = EthernetFrame::new_unchecked(buffer);
+// let eth_packet = EthernetRepr {
+//     dst_addr: EthernetAddress::BROADCAST,
+//     src_addr: server_mac_address,
+//     ethertype: EthernetProtocol::Ipv4,
+// };
+// eth_packet.emit(&mut packet);
+
+// let mut packet = Ipv4Packet::new_unchecked(packet.payload_mut());
+// let ip_packet = Ipv4Repr {
+//     src_addr: server_ip,
+//     dst_addr: Ipv4Address::BROADCAST,
+//     protocol: IpProtocol::Udp,
+//     hop_limit: 128,
+//     payload_len: dhcp_packet.buffer_len() + udp_packet.header_len(),
+// };
+// ip_packet.emit(&mut packet, &checksum);
+
+// let mut packet = UdpPacket::new_unchecked(packet.payload_mut());
+// udp_packet.emit(
+//     &mut packet,
+//     &server_ip.into(),
+//     &Ipv4Address::BROADCAST.into(),
+//     dhcp_packet.buffer_len(),
+//     |buf| {
+//         let mut packet = DhcpPacket::new_unchecked(buf);
+//         dhcp_packet.emit(&mut packet).unwrap();
+//     },
+//     &checksum,
+// );
+
+// info!("Sending DHCP offer...");
+// Ok(())
