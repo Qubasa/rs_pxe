@@ -158,11 +158,11 @@
     "smoltcp": {
       "flake": false,
       "locked": {
-        "lastModified": 1683500187,
-        "narHash": "sha256-8OeMPLhGwgEnkdnXv6XnlH/mydEZltMAy3+5r+1J5fA=",
+        "lastModified": 1684589548,
+        "narHash": "sha256-rFQSg61iakjWa9btC8JupRd1sYjmUrN7KHt+IUrUFA4=",
         "owner": "luis-hebendanz",
         "repo": "smoltcp",
-        "rev": "d5c99d880ff8899896f747ba93b12fd9976b55df",
+        "rev": "af017d08290e06647099bdd51d60c102bf18280a",
         "type": "github"
       },
       "original": {
