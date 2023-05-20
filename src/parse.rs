@@ -99,7 +99,6 @@ pub fn pxe_discover(dhcp: DhcpPacket<&[u8]>) -> Result<PxeClientInfo> {
 
 #[cfg(test)]
 mod test {
-    use uuid::Uuid;
 
     use super::*;
     static PXE_DISCOVER: &[u8] = &[
@@ -158,9 +157,7 @@ mod test {
         assert_eq!(info.client_identifier.hardware_type, HardwareType::Ethernet);
         assert_eq!(
             info.client_uuid,
-            PxeUuid {
-                uuid: Uuid::from_bytes([0x00; 16])
-            }
+            PxeUuid::try_from([0x00; 17].as_slice()).expect("Failed to create PxeUuid")
         );
     }
 

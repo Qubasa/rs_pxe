@@ -346,8 +346,12 @@ impl TryFrom<&[u8]> for PxeUuid {
     type Error = Error;
 
     fn try_from(value: &[u8]) -> Result<Self> {
-        let uuid = Uuid::from_slice(value)
-            .map_err(|_| Error::Malformed("UUID is malformed".to_string()))?;
+        if value[0] != 0 {
+            return Err(Error::Malformed("Type of UUID must be 0".to_string()));
+        }
+
+        let uuid = Uuid::from_slice(&value[1..])
+            .map_err(|e| Error::Malformed(f!("UUID is malformed. Reason: {}", e)))?;
         Ok(PxeUuid { uuid })
     }
 }
