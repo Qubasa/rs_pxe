@@ -1,7 +1,7 @@
 use std::fmt::{self, Display, Formatter};
 
 use ouroboros::self_referencing;
-use smoltcp::wire::{DhcpOption, EthernetAddress};
+use smoltcp::wire::{DhcpOption, EthernetAddress, Ipv4Address};
 use uuid::Uuid;
 
 use crate::error::Error;
@@ -337,6 +337,41 @@ impl From<ClientIdentifier> for DhcpOptionWrapper {
         .build()
     }
 }
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct PxeServerIdentifier {
+    pub ip: Ipv4Address,
+}
+
+impl TryFrom<&[u8]> for PxeServerIdentifier {
+    type Error = Error;
+
+    fn try_from(value: &[u8]) -> Result<Self> {
+        if value.len() != 4 {
+            return Err(Error::Malformed(
+                "PXE Server Identifier must be 4 bytes long".to_string(),
+            ));
+        }
+
+        let ip = Ipv4Address::from_bytes(value);
+        Ok(PxeServerIdentifier { ip })
+    }
+}
+
+impl From<PxeServerIdentifier> for DhcpOptionWrapper {
+    fn from(val: PxeServerIdentifier) -> Self {
+        DhcpOptionWrapperBuilder {
+            mdata: val.ip.as_bytes().to_vec(),
+            option_builder: |data| {
+                let kind = PxeDhcpOption::ServerIdentifier.into();
+                let data = data;
+                DhcpOption { kind, data }
+            },
+        }
+        .build()
+    }
+}
+
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct PxeUuid {
     pub uuid: Uuid,

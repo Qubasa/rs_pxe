@@ -49,7 +49,7 @@ pub struct DhcpReprWrapper {
 
     #[borrows(options, boot_file)]
     #[covariant]
-    repr: DhcpRepr<'this>,
+    pub repr: DhcpRepr<'this>,
 }
 
 pub fn pxe_offer(info: &PxeClientInfo, server_ip: &Ipv4Address) -> DhcpReprWrapper {
@@ -63,9 +63,13 @@ pub fn pxe_offer(info: &PxeClientInfo, server_ip: &Ipv4Address) -> DhcpReprWrapp
         t => panic!("Unsupported hardware type: {:#?}", t),
     };
 
+    let vendor_id = VendorClassIdentifier::try_from("PXEClient".as_bytes()).unwrap();
+    let server_id = PxeServerIdentifier::try_from(server_ip.clone().as_bytes()).unwrap();
     let mut options: Vec<DhcpOptionWrapper> = vec![
         info.client_identifier.clone().into(),
         info.client_uuid.clone().into(),
+        server_id.into(),
+        vendor_id.into(),
     ];
 
     if let Some(id) = info.vendor_id.clone() {
