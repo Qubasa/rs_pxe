@@ -137,7 +137,7 @@ where
             Err(e) => panic!("Error: {}", e),
         };
 
-        tx_token.consume(1500, |buffer| {
+        tx_token.consume(350 - 15 - 4, |buffer| {
             let dhcp_repr = construct::pxe_offer(&info, &server_ip);
             utils::dhcp_to_ether(buffer, dhcp_repr.borrow_repr(), &server_ip, &server_mac);
         });

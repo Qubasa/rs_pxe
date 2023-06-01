@@ -94,6 +94,8 @@ pub fn dhcp_to_ether<'a>(
     let mut packet = Ipv4Packet::new_unchecked(packet.payload_mut());
     ip_packet.emit(&mut packet, &checksum);
 
+    assert!(dhcp.subnet_mask.is_none());
+
     let mut packet = UdpPacket::new_unchecked(packet.payload_mut());
     udp_packet.emit(
         &mut packet,

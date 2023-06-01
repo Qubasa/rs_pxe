@@ -72,9 +72,6 @@ pub fn pxe_offer(info: &PxeClientInfo, server_ip: &Ipv4Address) -> DhcpReprWrapp
         vendor_id.into(),
     ];
 
-    if let Some(id) = info.vendor_id.clone() {
-        options.push(id.into());
-    }
     let boot_file: String = f!(
         "http://{}:7777/ipxe?client_id={}",
         server_ip,

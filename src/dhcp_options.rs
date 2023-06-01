@@ -329,8 +329,8 @@ impl From<ClientIdentifier> for DhcpOptionWrapper {
         DhcpOptionWrapperBuilder {
             mdata: res,
             option_builder: |data| {
-                let kind = data[0];
-                let data = &data[1..];
+                let kind = PxeDhcpOption::ClientIdentifier.into();
+                let data = &data;
                 DhcpOption { kind, data }
             },
         }
@@ -393,8 +393,10 @@ impl TryFrom<&[u8]> for PxeUuid {
 
 impl From<PxeUuid> for DhcpOptionWrapper {
     fn from(val: PxeUuid) -> Self {
+        let mut data = val.uuid.as_bytes().to_vec();
+        data.insert(0, 0); // Type ethernet
         DhcpOptionWrapperBuilder {
-            mdata: val.uuid.as_bytes().to_vec(),
+            mdata: data,
             option_builder: |data| {
                 let kind = PxeDhcpOption::ClientUuid.into();
                 let data = &data;
