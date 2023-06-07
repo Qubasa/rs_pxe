@@ -52,6 +52,65 @@ pub struct DhcpReprWrapper {
     pub repr: DhcpRepr<'this>,
 }
 
+pub fn pxe_ack(info: &PxeClientInfo, server_ip: &Ipv4Address) -> DhcpReprWrapper {
+    const IP_NULL: Ipv4Address = Ipv4Address([0, 0, 0, 0]);
+
+    let client_addr = match info.client_identifier.hardware_type {
+        HardwareType::Ethernet => {
+            let mac = &info.client_identifier.hardware_address;
+            EthernetAddress::from_bytes(mac)
+        }
+        t => panic!("Unsupported hardware type: {:#?}", t),
+    };
+
+    let mut options: Vec<DhcpOptionWrapper> = vec![];
+
+    let boot_file: String = f!(
+        "http://{}:7777/ipxe?client_id={}",
+        server_ip,
+        info.client_identifier
+    );
+
+    DhcpReprWrapperBuilder {
+        mdata: options,
+        boot_file,
+        options_builder: |mdata: &Vec<DhcpOptionWrapper>| {
+            let options: Vec<DhcpOption> = mdata.iter().map(|x| x.into()).collect();
+            options
+        },
+        repr_builder: |options: &Vec<DhcpOption>, boot_file: &String| {
+            DhcpRepr {
+                sname: None,
+                boot_file: Some(boot_file),
+                message_type: DhcpMessageType::Ack,
+                transaction_id: info.transaction_id,
+                client_hardware_address: client_addr,
+                secs: info.secs,
+                client_ip: IP_NULL,
+                your_ip: IP_NULL,
+                server_ip: server_ip.to_owned(),
+                broadcast: true,
+                relay_agent_ip: IP_NULL,
+
+                // unimportant
+                router: None,
+                subnet_mask: None,
+                requested_ip: None,
+                client_identifier: None,
+                server_identifier: None,
+                parameter_request_list: None,
+                dns_servers: None,
+                max_size: None,
+                lease_duration: None,
+                renew_duration: None,
+                rebind_duration: None,
+                additional_options: options,
+            }
+        },
+    }
+    .build()
+}
+
 pub fn pxe_offer(info: &PxeClientInfo, server_ip: &Ipv4Address) -> DhcpReprWrapper {
     const IP_NULL: Ipv4Address = Ipv4Address([0, 0, 0, 0]);
 

@@ -101,6 +101,11 @@ fn main() {
     };
 }
 
+enum States {
+    Discover,
+    Request(u32),
+}
+
 pub fn server<DeviceT: AsRawFd>(device: &mut DeviceT, iface: &mut Interface)
 where
     DeviceT: for<'d> Device,
@@ -116,30 +121,105 @@ where
     checksum.ipv4 = Checksum::Both;
     checksum.udp = Checksum::Both;
 
+    let mut state = States::Discover;
+
     loop {
         let time = Instant::now();
         phy_wait(fd, None).unwrap();
         let (rx_token, tx_token) = device.receive(time).unwrap();
-        let info = match rx_token.consume(|buffer| {
-            let dhcp = crate::utils::ether_to_dhcp(buffer)?;
-            let info = rs_pxe::parse::pxe_discover(dhcp)?;
 
-            if info.msg_type != DhcpMessageType::Discover {
-                return Err(Error::Ignore("Not a dhcp discover packet".to_string()));
-            }
-            Ok(info)
-        }) {
-            Ok(info) => info,
-            Err(Error::Ignore(e)) => {
-                trace!("Ignoring packet. Reason: {}", e);
-                continue;
-            }
-            Err(e) => panic!("Error: {}", e),
-        };
+        match state {
+            States::Discover => {
+                // Parse PXE Discover
+                let info = match rx_token.consume(|buffer| {
+                    let dhcp = crate::utils::broadcast_ether_to_dhcp(buffer)?;
+                    let info = rs_pxe::parse::pxe_discover(dhcp)?;
 
-        tx_token.consume(350 - 15 - 4, |buffer| {
-            let dhcp_repr = construct::pxe_offer(&info, &server_ip);
-            utils::dhcp_to_ether(buffer, dhcp_repr.borrow_repr(), &server_ip, &server_mac);
-        });
+                    if info.msg_type != DhcpMessageType::Discover {
+                        return Err(Error::Ignore("Not a dhcp discover packet".to_string()));
+                    }
+                    Ok(info)
+                }) {
+                    Ok(info) => info,
+                    Err(Error::Ignore(e)) => {
+                        trace!("Ignoring packet. Reason: {}", e);
+                        continue;
+                    }
+                    Err(e) => panic!("Error: {}", e),
+                };
+
+                log::info!("Parsed PXE Discover");
+                log::info!("Sending PXE Offer");
+
+                // Send PXE Offer
+                tx_token.consume(500, |buffer| {
+                    let dhcp_repr = construct::pxe_offer(&info, &server_ip);
+                    utils::dhcp_to_ether_brdcast(
+                        buffer,
+                        dhcp_repr.borrow_repr(),
+                        &server_ip,
+                        &server_mac,
+                    );
+                });
+
+                log::info!("Sent PXE Offer");
+                log::info!("Waiting for PXE Request");
+
+                state = States::Request(info.transaction_id);
+            }
+            States::Request(transaction_id) => {
+                // Parse PXE Request
+                let (info, ip, mac) = match rx_token.consume(|buffer| {
+                    let dhcp =
+                        crate::utils::unicast_ether_to_dhcp(buffer, &server_mac, &server_ip)?;
+
+                    let info = rs_pxe::parse::pxe_discover(dhcp)?;
+
+                    if info.msg_type != DhcpMessageType::Request {
+                        return Err(Error::Ignore("Not a dhcp request packet".to_string()));
+                    }
+
+                    if info.transaction_id != transaction_id {
+                        return Err(Error::Ignore("Not the same transaction id".to_string()));
+                    }
+                    log::info!("your ip: {}", dhcp.your_ip());
+                    log::info!("client ip: {}", dhcp.client_ip());
+                    log::info!(
+                        "client hardware address: {}",
+                        dhcp.client_hardware_address()
+                    );
+                    log::info!("server ip: {}", dhcp.server_ip());
+
+                    Ok((info, dhcp.client_ip(), dhcp.client_hardware_address()))
+                }) {
+                    Ok(info) => info,
+                    Err(Error::Ignore(e)) => {
+                        trace!("Ignoring packet. Reason: {}", e);
+                        continue;
+                    }
+                    Err(e) => panic!("Error: {}", e),
+                };
+
+                log::info!("Parsed PXE Request");
+                log::info!("Sending PXE ACK to {} with ip {}", mac, ip);
+
+                // Send PXE ACK
+                tx_token.consume(500, |buffer| {
+                    let dhcp_repr = construct::pxe_ack(&info, &server_ip);
+                    utils::dhcp_to_ether_unicast(
+                        buffer,
+                        dhcp_repr.borrow_repr(),
+                        &ip,
+                        &mac,
+                        &server_ip,
+                        &server_mac,
+                    );
+                });
+
+                log::info!("Sent PXE ACK");
+
+                state = States::Discover;
+            }
+        }
     }
 }
