@@ -35,6 +35,7 @@ use smoltcp::wire::UdpPacket;
 use smoltcp::wire::UdpRepr;
 
 use std::cell::RefCell;
+use std::net::Ipv6Addr;
 use std::rc::Rc;
 
 #[self_referencing]
@@ -52,7 +53,10 @@ pub struct DhcpReprWrapper {
     pub repr: DhcpRepr<'this>,
 }
 
-pub fn pxe_ack(info: &PxeClientInfo, server_ip: &Ipv4Address) -> DhcpReprWrapper {
+pub fn pxe_ack(
+    info: &PxeClientInfo,
+    endpoint: &smoltcp::wire::IpListenEndpoint,
+) -> DhcpReprWrapper {
     const IP_NULL: Ipv4Address = Ipv4Address([0, 0, 0, 0]);
 
     let client_addr = match info.client_identifier.hardware_type {
@@ -63,7 +67,11 @@ pub fn pxe_ack(info: &PxeClientInfo, server_ip: &Ipv4Address) -> DhcpReprWrapper
         t => panic!("Unsupported hardware type: {:#?}", t),
     };
 
-    let mut options: Vec<DhcpOptionWrapper> = vec![];
+    let server_ip = match endpoint.addr.unwrap() {
+        IpAddress::Ipv4(a) => a,
+        IpAddress::Ipv6(_) => todo!("IPv6 not supported"),
+    };
+    let options: Vec<DhcpOptionWrapper> = vec![];
 
     let boot_file: String = f!(
         "http://{}:7777/ipxe?client_id={}",
@@ -88,7 +96,7 @@ pub fn pxe_ack(info: &PxeClientInfo, server_ip: &Ipv4Address) -> DhcpReprWrapper
                 secs: info.secs,
                 client_ip: IP_NULL,
                 your_ip: IP_NULL,
-                server_ip: server_ip.to_owned(),
+                server_ip,
                 broadcast: true,
                 relay_agent_ip: IP_NULL,
 

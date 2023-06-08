@@ -23,6 +23,7 @@ use smoltcp::wire::DhcpPacket;
 use smoltcp::wire::EthernetAddress;
 use smoltcp::wire::EthernetFrame;
 use smoltcp::wire::HardwareAddress;
+use smoltcp::wire::IpListenEndpoint;
 
 use rand::prelude::*;
 use smoltcp::wire::IpAddress;
@@ -114,15 +115,26 @@ where
 {
     log::info!("Starting server");
     let fd = device.as_raw_fd();
+
+    // Get interface mac and ip
     let server_mac = match iface.hardware_addr() {
         HardwareAddress::Ethernet(addr) => addr,
         _ => panic!("Currently we only support ethernet"),
     };
     let server_ip = iface.ipv4_addr().unwrap();
-    let mut checksum = ChecksumCapabilities::ignored();
-    checksum.ipv4 = Checksum::Both;
-    checksum.udp = Checksum::Both;
 
+    // Find free tftp port in userspace range
+    let tftp_endpoint = {
+        let free_port = crate::udp_port_check::free_local_port_in_range(32768, 60999)
+            .expect("No free UDP port found");
+
+        IpListenEndpoint {
+            addr: Some(server_ip.into_address()),
+            port: free_port,
+        }
+    };
+
+    // State machine
     let mut state = States::Discover;
 
     loop {
@@ -254,7 +266,7 @@ where
                     - Any other options the NBP requires before it can be successfully executed.
                 */
                 tx_token.consume(500, |buffer| {
-                    let dhcp_repr = construct::pxe_ack(&info, &server_ip);
+                    let dhcp_repr = construct::pxe_ack(&info, &tftp_endpoint);
                     utils::dhcp_to_ether_unicast(
                         buffer,
                         dhcp_repr.borrow_repr(),
@@ -274,7 +286,9 @@ where
                 */
                 state = States::TFTP;
             }
-            States::TFTP => state = States::Discover,
+            States::TFTP => {
+                state = States::Discover;
+            }
             States::Done => todo!(),
         }
     }
