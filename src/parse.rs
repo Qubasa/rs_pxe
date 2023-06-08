@@ -34,39 +34,39 @@ pub fn pxe_discover(dhcp: DhcpPacket<&[u8]>) -> Result<PxeClientInfo> {
     }
 
     for option in dhcp.options() {
-        if let Ok(opt_kind) = PxeDhcpOption::try_from(option.kind) {
+        if let Ok(opt_kind) = SubsetDhcpOption::try_from(option.kind) {
             match opt_kind {
-                PxeDhcpOption::MessageType => {
+                SubsetDhcpOption::MessageType => {
                     // Message Type
                     let mtype = DhcpMessageType::try_from(option.data[0])
                         .map_err(|e| Error::Malformed(f!("Invalid message type: {}", e)))?;
                     msg_type = Some(mtype);
                 }
-                PxeDhcpOption::ClientSystemArchitecture => {
+                SubsetDhcpOption::ClientSystemArchitecture => {
                     let t = ClientArchType::try_from(option.data)?;
                     client_arch = Some(t);
                 }
-                PxeDhcpOption::ClientNetworkInterfaceIdentifier => {
+                SubsetDhcpOption::ClientNetworkInterfaceIdentifier => {
                     let t = NetworkInterfaceVersion::try_from(option.data).map_err(|e| {
                         Error::Malformed(f!("Invalid network interface version: {}", e))
                     })?;
 
                     network_interface_version = Some(t);
                 }
-                PxeDhcpOption::ClientUuid => {
+                SubsetDhcpOption::ClientUuid => {
                     let t = PxeUuid::try_from(option.data)?;
                     client_uuid = Some(t);
                 }
-                PxeDhcpOption::VendorClassIdentifier => {
+                SubsetDhcpOption::VendorClassIdentifier => {
                     let s = VendorClassIdentifier::try_from(option.data)?;
                     vendor_id = Some(s);
                 }
-                PxeDhcpOption::ClientIdentifier => {
+                SubsetDhcpOption::ClientIdentifier => {
                     let t = ClientIdentifier::try_from(option.data)
                         .map_err(|e| Error::Malformed(f!("Invalid client identifier: {}", e)))?;
                     client_identifier = Some(t);
                 }
-                PxeDhcpOption::ParameterRequestList | PxeDhcpOption::MaximumMessageSize => {
+                SubsetDhcpOption::ParameterRequestList | SubsetDhcpOption::MaximumMessageSize => {
                     // Ignore
                 }
                 _ => {

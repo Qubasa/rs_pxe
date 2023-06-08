@@ -104,6 +104,8 @@ fn main() {
 enum States {
     Discover,
     Request(u32),
+    TFTP,
+    Done,
 }
 
 pub fn server<DeviceT: AsRawFd>(device: &mut DeviceT, iface: &mut Interface)
@@ -130,7 +132,15 @@ where
 
         match state {
             States::Discover => {
-                // Parse PXE Discover
+                /* ================== Parse PXE Discover ================== */
+                /*
+                Step 1. The client broadcasts a DHCPDISCOVER message to the standard DHCP port (67).
+                An option field in this packet contains the following:
+                   - A tag for client identifier (UUID).
+                   - A tag for the client UNDI version.
+                   - A tag for the client system architecture.
+                   - A DHCP option 60, Class ID, set to “PXEClient:Arch:xxxxx:UNDI:yyyzzz”.
+                */
                 let info = match rx_token.consume(|buffer| {
                     let dhcp = crate::utils::broadcast_ether_to_dhcp(buffer)?;
                     let info = rs_pxe::parse::pxe_discover(dhcp)?;
@@ -141,8 +151,12 @@ where
                     Ok(info)
                 }) {
                     Ok(info) => info,
-                    Err(Error::Ignore(e)) => {
+                    Err(Error::IgnoreNoLog(e)) => {
                         trace!("Ignoring packet. Reason: {}", e);
+                        continue;
+                    }
+                    Err(Error::Ignore(e)) => {
+                        debug!("Ignoring packet. Reason: {}", e);
                         continue;
                     }
                     Err(e) => panic!("Error: {}", e),
@@ -151,7 +165,13 @@ where
                 log::info!("Parsed PXE Discover");
                 log::info!("Sending PXE Offer");
 
-                // Send PXE Offer
+                /*  ================== Send PXE Offer ================== */
+                /*
+                Step 2. The DHCP or Proxy DHCP Service responds by sending a DHCPOFFER message to the
+                client on the standard DHCP reply port (68). If this is a Proxy DHCP Service, then the client IP
+                address field is null (0.0.0.0). If this is a DHCP Service, then the returned client IP address
+                field is valid.
+                */
                 tx_token.consume(500, |buffer| {
                     let dhcp_repr = construct::pxe_offer(&info, &server_ip);
                     utils::dhcp_to_ether_brdcast(
@@ -165,10 +185,35 @@ where
                 log::info!("Sent PXE Offer");
                 log::info!("Waiting for PXE Request");
 
+                /*
+                Step 3. From the DHCPOFFER(s) that it receives, the client records the following:
+                - The Client IP address (and other parameters) offered by a standard DHCP or BOOTP Service.
+                - The Boot Server list from the Boot Server field in the PXE tags from the DHCPOFFER.
+                - The Discovery Control Options (if provided).
+                - The Multicast Discovery IP address (if provided).
+
+                Step 4. If the client selects an IP address offered by a DHCP Service, then it must complete the
+                standard DHCP protocol by sending a request for the address back to the Service and then waiting for
+                an acknowledgment from the Service. If the client selects an IP address from a BOOTP reply, it can
+                simply use the address.
+                */
                 state = States::Request(info.transaction_id);
             }
             States::Request(transaction_id) => {
-                // Parse PXE Request
+                /*  ================== Parse PXE Request ================== */
+                /*
+                Step 5. The client selects and discovers a Boot Server. This packet may be sent broadcast (port 67),
+                multicast (port 4011), or unicast (port 4011) depending on discovery control options included in the
+                previous DHCPOFFER containing the PXE service extension tags. This packet is the same as the
+                initial DHCPDISCOVER in Step 1, except that it is coded as a DHCPREQUEST and now contains
+                the following:
+                  - The IP address assigned to the client from a DHCP Service.
+                  - A tag for client identifier (UUID)
+                  - A tag for the client UNDI version.
+                  - A tag for the client system architecture.
+                  - A DHCP option 60, Class ID, set to “PXEClient:Arch:xxxxx:UNDI:yyyzzz”.
+                  - The Boot Server type in a PXE option field
+                */
                 let (info, ip, mac) = match rx_token.consume(|buffer| {
                     let dhcp =
                         crate::utils::unicast_ether_to_dhcp(buffer, &server_mac, &server_ip)?;
@@ -182,19 +227,16 @@ where
                     if info.transaction_id != transaction_id {
                         return Err(Error::Ignore("Not the same transaction id".to_string()));
                     }
-                    log::info!("your ip: {}", dhcp.your_ip());
-                    log::info!("client ip: {}", dhcp.client_ip());
-                    log::info!(
-                        "client hardware address: {}",
-                        dhcp.client_hardware_address()
-                    );
-                    log::info!("server ip: {}", dhcp.server_ip());
 
                     Ok((info, dhcp.client_ip(), dhcp.client_hardware_address()))
                 }) {
                     Ok(info) => info,
-                    Err(Error::Ignore(e)) => {
+                    Err(Error::IgnoreNoLog(e)) => {
                         trace!("Ignoring packet. Reason: {}", e);
+                        continue;
+                    }
+                    Err(Error::Ignore(e)) => {
+                        debug!("Ignoring packet. Reason: {}", e);
                         continue;
                     }
                     Err(e) => panic!("Error: {}", e),
@@ -203,7 +245,14 @@ where
                 log::info!("Parsed PXE Request");
                 log::info!("Sending PXE ACK to {} with ip {}", mac, ip);
 
-                // Send PXE ACK
+                /* ================== Send PXE ACK ================== */
+                /*
+                Step 6. The Boot Server unicasts a DHCPACK packet back to the client on the client source port.
+                This reply packet contains:
+                    - Boot file name.
+                    - MTFTP configuration parameters.
+                    - Any other options the NBP requires before it can be successfully executed.
+                */
                 tx_token.consume(500, |buffer| {
                     let dhcp_repr = construct::pxe_ack(&info, &server_ip);
                     utils::dhcp_to_ether_unicast(
@@ -218,8 +267,15 @@ where
 
                 log::info!("Sent PXE ACK");
 
-                state = States::Discover;
+                /*
+                Step 7. The client downloads the executable file using either standard TFTP (port69) or MTFTP
+                (port assigned in Boot Server Ack packet). The file downloaded and the placement of the
+                downloaded code in memory is dependent on the client’s CPU architecture.
+                */
+                state = States::TFTP;
             }
+            States::TFTP => state = States::Discover,
+            States::Done => todo!(),
         }
     }
 }

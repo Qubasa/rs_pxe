@@ -124,11 +124,23 @@ pub fn pxe_offer(info: &PxeClientInfo, server_ip: &Ipv4Address) -> DhcpReprWrapp
 
     let vendor_id = VendorClassIdentifier::try_from("PXEClient".as_bytes()).unwrap();
     let server_id = PxeServerIdentifier::try_from(server_ip.clone().as_bytes()).unwrap();
-    let mut options: Vec<DhcpOptionWrapper> = vec![
+
+    let vendor_options: Vec<VendorOption> = {
+        let pxe_discover_control = PxeDiscoverControl::new()
+            .with_disable_broadcast(true)
+            .with_disable_multicast(true)
+            .with_direct_boot_file_download(true)
+            .with_only_pxe_boot_servers(false);
+
+        vec![pxe_discover_control.into()]
+    };
+
+    let options: Vec<DhcpOptionWrapper> = vec![
         info.client_identifier.clone().into(),
         info.client_uuid.clone().into(),
         server_id.into(),
         vendor_id.into(),
+        vendor_options.as_slice().into(),
     ];
 
     let boot_file: String = f!(

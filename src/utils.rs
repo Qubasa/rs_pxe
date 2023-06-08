@@ -23,38 +23,38 @@ use smoltcp::wire::UdpPacket;
 pub fn broadcast_ether_to_dhcp(buffer: &[u8]) -> Result<DhcpPacket<&[u8]>> {
     let ether = EthernetFrame::new_checked(buffer).unwrap();
     if ether.dst_addr() != EthernetAddress::BROADCAST {
-        return Err(Error::Ignore("Not a broadcast packet".to_string()));
+        return Err(Error::IgnoreNoLog("Not a broadcast packet".to_string()));
     }
 
     let ipv4 = match Ipv4Packet::new_checked(ether.payload()) {
         Ok(i) => i,
         Err(e) => {
             let err = format!("Parsing ipv4 packet failed: {}", e);
-            return Err(Error::Ignore(err));
+            return Err(Error::IgnoreNoLog(err));
         }
     };
 
     if ipv4.dst_addr() != Ipv4Address::BROADCAST {
-        return Err(Error::Ignore("Not a broadcast packet".to_string()));
+        return Err(Error::IgnoreNoLog("Not a broadcast packet".to_string()));
     }
 
     let udp = match UdpPacket::new_checked(ipv4.payload()) {
         Ok(u) => u,
         Err(e) => {
             let err = format!("Parsing udp packet failed: {}", e);
-            return Err(Error::Ignore(err));
+            return Err(Error::IgnoreNoLog(err));
         }
     };
 
     if udp.dst_port() != 67 {
-        return Err(Error::Ignore("Not a dhcp packet".to_string()));
+        return Err(Error::IgnoreNoLog("Not a dhcp packet".to_string()));
     }
 
     let dhcp = match DhcpPacket::new_checked(udp.payload()) {
         Ok(d) => d,
         Err(e) => {
             let err = format!("Parsing dhcp packet failed: {}", e);
-            return Err(Error::Ignore(err));
+            return Err(Error::IgnoreNoLog(err));
         }
     };
     Ok(dhcp)
@@ -67,8 +67,7 @@ pub fn unicast_ether_to_dhcp<'a>(
 ) -> Result<DhcpPacket<&'a [u8]>> {
     let ether = EthernetFrame::new_checked(buffer).unwrap();
     if ether.dst_addr() != *server_mac {
-        // TODO: Spec says broadcast is allowed too
-        return Err(Error::Ignore(
+        return Err(Error::IgnoreNoLog(
             "Mac address does not match with ours. And isn't broardcast".to_string(),
         ));
     }
@@ -77,12 +76,12 @@ pub fn unicast_ether_to_dhcp<'a>(
         Ok(i) => i,
         Err(e) => {
             let err = format!("Parsing ipv4 packet failed: {}", e);
-            return Err(Error::Ignore(err));
+            return Err(Error::IgnoreNoLog(err));
         }
     };
 
     if ipv4.dst_addr() != *server_ip {
-        return Err(Error::Ignore(
+        return Err(Error::IgnoreNoLog(
             "IP destination does not match our server ip".to_string(),
         ));
     }
@@ -91,12 +90,12 @@ pub fn unicast_ether_to_dhcp<'a>(
         Ok(u) => u,
         Err(e) => {
             let err = format!("Parsing udp packet failed: {}", e);
-            return Err(Error::Ignore(err));
+            return Err(Error::IgnoreNoLog(err));
         }
     };
 
     if udp.dst_port() != 4011 && udp.dst_port() != 67 {
-        return Err(Error::Ignore(
+        return Err(Error::IgnoreNoLog(
             "Not a dhcp packet. Port does not match".to_string(),
         ));
     }

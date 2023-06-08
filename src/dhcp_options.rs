@@ -1,17 +1,57 @@
 use std::fmt::{self, Display, Formatter};
 
+use crate::error::Error;
+use modular_bitfield::prelude::*;
 use ouroboros::self_referencing;
 use smoltcp::wire::{DhcpOption, EthernetAddress, Ipv4Address};
 use uuid::Uuid;
 
-use crate::error::Error;
-
 use crate::prelude::*;
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub enum PxeVendorOption {
+    MtftpIp,
+    MtftpCport,
+    MtftpSport,
+    MtftpTimeout,
+    MtftpDelay,
+    DiscoverControl(PxeDiscoverControl),
+    DisoveryMcastAddr,
+    BootServers,
+    BootMenu,
+    MenuPrompt,
+    McastAddr,
+    CredentailTypes,
+    BootItems,
+    End,
+}
+
+impl From<PxeVendorOption> for u8 {
+    fn from(val: PxeVendorOption) -> Self {
+        match val {
+            PxeVendorOption::MtftpIp => 1,
+            PxeVendorOption::MtftpCport => 2,
+            PxeVendorOption::MtftpSport => 3,
+            PxeVendorOption::MtftpTimeout => 4,
+            PxeVendorOption::MtftpDelay => 5,
+            PxeVendorOption::DiscoverControl(_) => 6,
+            PxeVendorOption::DisoveryMcastAddr => 7,
+            PxeVendorOption::BootServers => 8,
+            PxeVendorOption::BootMenu => 9,
+            PxeVendorOption::MenuPrompt => 10,
+            PxeVendorOption::McastAddr => 11,
+            PxeVendorOption::CredentailTypes => 12,
+            PxeVendorOption::BootItems => 71,
+            PxeVendorOption::End => 255,
+        }
+    }
+}
 
 #[repr(u8)]
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
-pub enum PxeDhcpOption {
+pub enum SubsetDhcpOption {
     ClientUuid = 97,
     ClientIdentifier = 61,
     ClientNetworkInterfaceIdentifier = 94,
@@ -22,55 +62,30 @@ pub enum PxeDhcpOption {
     MessageType = 53,
     ServerIdentifier = 54,
     MaximumMessageSize = 57,
-    PxeMtftpIp = 1,
-    PxeMtftpCport = 2,
-    PxeMtftpSport = 3,
-    PxeMtftpTimeout = 4,
-    PxeMtftpDelay = 5,
-    PxeDiscoverControl = 6,
-    DisoveryMcastAddr = 7,
-    PxeBootServers = 8,
-    PxeBootMenu = 9,
-    PxeMenuPrompt = 10,
-    PxeMcastAddr = 11,
-    PxeCredentailTypes = 12,
-    PxeBootItems = 71,
     End = 255,
 }
-impl From<PxeDhcpOption> for u8 {
-    fn from(val: PxeDhcpOption) -> Self {
+
+impl From<SubsetDhcpOption> for u8 {
+    fn from(val: SubsetDhcpOption) -> Self {
         val as u8
     }
 }
 
-impl TryFrom<u8> for PxeDhcpOption {
+impl TryFrom<u8> for SubsetDhcpOption {
     type Error = Error;
     fn try_from(value: u8) -> Result<Self> {
         match value {
-            97 => Ok(PxeDhcpOption::ClientUuid),
-            61 => Ok(PxeDhcpOption::ClientIdentifier),
-            94 => Ok(PxeDhcpOption::ClientNetworkInterfaceIdentifier),
-            93 => Ok(PxeDhcpOption::ClientSystemArchitecture),
-            55 => Ok(PxeDhcpOption::ParameterRequestList),
-            60 => Ok(PxeDhcpOption::VendorClassIdentifier),
-            43 => Ok(PxeDhcpOption::VendorOptions),
-            53 => Ok(PxeDhcpOption::MessageType),
-            54 => Ok(PxeDhcpOption::ServerIdentifier),
-            57 => Ok(PxeDhcpOption::MaximumMessageSize),
-            1 => Ok(PxeDhcpOption::PxeMtftpIp),
-            2 => Ok(PxeDhcpOption::PxeMtftpCport),
-            3 => Ok(PxeDhcpOption::PxeMtftpSport),
-            4 => Ok(PxeDhcpOption::PxeMtftpTimeout),
-            5 => Ok(PxeDhcpOption::PxeMtftpDelay),
-            6 => Ok(PxeDhcpOption::PxeDiscoverControl),
-            7 => Ok(PxeDhcpOption::DisoveryMcastAddr),
-            8 => Ok(PxeDhcpOption::PxeBootServers),
-            9 => Ok(PxeDhcpOption::PxeBootMenu),
-            10 => Ok(PxeDhcpOption::PxeMenuPrompt),
-            11 => Ok(PxeDhcpOption::PxeMcastAddr),
-            12 => Ok(PxeDhcpOption::PxeCredentailTypes),
-            71 => Ok(PxeDhcpOption::PxeBootItems),
-            255 => Ok(PxeDhcpOption::End),
+            97 => Ok(SubsetDhcpOption::ClientUuid),
+            61 => Ok(SubsetDhcpOption::ClientIdentifier),
+            94 => Ok(SubsetDhcpOption::ClientNetworkInterfaceIdentifier),
+            93 => Ok(SubsetDhcpOption::ClientSystemArchitecture),
+            55 => Ok(SubsetDhcpOption::ParameterRequestList),
+            60 => Ok(SubsetDhcpOption::VendorClassIdentifier),
+            43 => Ok(SubsetDhcpOption::VendorOptions),
+            53 => Ok(SubsetDhcpOption::MessageType),
+            54 => Ok(SubsetDhcpOption::ServerIdentifier),
+            57 => Ok(SubsetDhcpOption::MaximumMessageSize),
+            255 => Ok(SubsetDhcpOption::End),
             e => Err(Error::UnknownDhcpValue(e.into())),
         }
     }
@@ -329,7 +344,7 @@ impl From<ClientIdentifier> for DhcpOptionWrapper {
         DhcpOptionWrapperBuilder {
             mdata: res,
             option_builder: |data| {
-                let kind = PxeDhcpOption::ClientIdentifier.into();
+                let kind = SubsetDhcpOption::ClientIdentifier.into();
                 let data = &data;
                 DhcpOption { kind, data }
             },
@@ -363,7 +378,7 @@ impl From<PxeServerIdentifier> for DhcpOptionWrapper {
         DhcpOptionWrapperBuilder {
             mdata: val.ip.as_bytes().to_vec(),
             option_builder: |data| {
-                let kind = PxeDhcpOption::ServerIdentifier.into();
+                let kind = SubsetDhcpOption::ServerIdentifier.into();
                 let data = data;
                 DhcpOption { kind, data }
             },
@@ -398,7 +413,7 @@ impl From<PxeUuid> for DhcpOptionWrapper {
         DhcpOptionWrapperBuilder {
             mdata: data,
             option_builder: |data| {
-                let kind = PxeDhcpOption::ClientUuid.into();
+                let kind = SubsetDhcpOption::ClientUuid.into();
                 let data = &data;
                 DhcpOption { kind, data }
             },
@@ -428,8 +443,72 @@ impl From<VendorClassIdentifier> for DhcpOptionWrapper {
         DhcpOptionWrapperBuilder {
             mdata: val.data.as_bytes().to_vec(),
             option_builder: |data| {
-                let kind = PxeDhcpOption::VendorClassIdentifier.into();
+                let kind = SubsetDhcpOption::VendorClassIdentifier.into();
                 let data = data;
+                DhcpOption { kind, data }
+            },
+        }
+        .build()
+    }
+}
+
+#[bitfield]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub struct PxeDiscoverControl {
+    pub disable_broadcast: bool,
+    pub disable_multicast: bool,
+    pub only_pxe_boot_servers: bool,
+    pub direct_boot_file_download: bool,
+    #[skip]
+    __: B4,
+}
+
+impl PxeDiscoverControl {
+    pub fn kind(&self) -> u8 {
+        PxeVendorOption::DiscoverControl(*self).into()
+    }
+}
+
+impl TryFrom<&[u8]> for PxeDiscoverControl {
+    type Error = Error;
+
+    fn try_from(value: &[u8]) -> Result<Self> {
+        let bytes: [u8; 1] = value.try_into().map_err(|_| {
+            Error::Malformed("PXE Discover Control must be 1 byte long".to_string())
+        })?;
+        let res = PxeDiscoverControl::from_bytes(bytes);
+        Ok(res)
+    }
+}
+
+impl From<PxeDiscoverControl> for VendorOption {
+    fn from(val: PxeDiscoverControl) -> Self {
+        let mut data = vec![];
+        data.extend_from_slice(&val.bytes);
+        let kind: u8 = val.kind();
+        VendorOption { kind, data }
+    }
+}
+
+pub struct VendorOption {
+    pub kind: u8,
+    pub data: Vec<u8>,
+}
+
+impl From<&[VendorOption]> for DhcpOptionWrapper {
+    fn from(val: &[VendorOption]) -> Self {
+        let mut data = Vec::new();
+        for opt in val {
+            data.push(opt.kind);
+            data.push(opt.data.len().try_into().unwrap());
+            data.extend_from_slice(&opt.data);
+        }
+        data.push(PxeVendorOption::End.into());
+        DhcpOptionWrapperBuilder {
+            mdata: data,
+            option_builder: |data| {
+                let kind = SubsetDhcpOption::VendorOptions.into();
+                let data = &data;
                 DhcpOption { kind, data }
             },
         }

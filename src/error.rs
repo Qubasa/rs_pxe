@@ -24,4 +24,7 @@ pub enum Error {
 
     #[error("Ignore")]
     Ignore(String),
+
+    #[error("Ignore no log")]
+    IgnoreNoLog(String),
 }

@@ -14,3 +14,4 @@ smoltcp = { path="./external/smoltcp" }
 rand = "0.8.5"
 thiserror = "1.0.40"
 ouroboros = "0.15.6"
+modular-bitfield = "0.11.2"
