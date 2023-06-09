@@ -135,9 +135,9 @@ pub fn pxe_offer(info: &PxeClientInfo, server_ip: &Ipv4Address) -> DhcpReprWrapp
 
     let vendor_options: Vec<VendorOption> = {
         let pxe_discover_control = PxeDiscoverControl::new()
-            .with_disable_broadcast(true)
-            .with_disable_multicast(true)
-            .with_direct_boot_file_download(true)
+            .with_disable_broadcast(false)
+            .with_disable_multicast(false)
+            .with_direct_boot_file_download(false)
             .with_only_pxe_boot_servers(false);
 
         vec![pxe_discover_control.into()]
@@ -148,7 +148,7 @@ pub fn pxe_offer(info: &PxeClientInfo, server_ip: &Ipv4Address) -> DhcpReprWrapp
         info.client_uuid.clone().into(),
         server_id.into(),
         vendor_id.into(),
-        vendor_options.as_slice().into(),
+        //vendor_options.as_slice().into(),
     ];
 
     let boot_file: String = f!(

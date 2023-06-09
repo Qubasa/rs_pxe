@@ -8,6 +8,7 @@ mod cli_opts;
 mod utils;
 
 use log::*;
+use rs_pxe::tftp_state::TestTftp;
 use smoltcp::iface::Config;
 use smoltcp::iface::Routes;
 use smoltcp::phy::wait as phy_wait;
@@ -23,6 +24,7 @@ use smoltcp::wire::DhcpPacket;
 use smoltcp::wire::EthernetAddress;
 use smoltcp::wire::EthernetFrame;
 use smoltcp::wire::HardwareAddress;
+use smoltcp::wire::IpEndpoint;
 use smoltcp::wire::IpListenEndpoint;
 
 use rand::prelude::*;
@@ -35,10 +37,13 @@ use smoltcp::{iface::Interface, phy::ChecksumCapabilities};
 use std::borrow::BorrowMut;
 use std::collections::BTreeMap;
 use std::convert::TryFrom;
+use std::fs::File;
 use std::io::Read;
 use std::os::unix::io::AsRawFd;
 use std::str::FromStr;
 use uuid::Uuid;
+
+use smolapps::wire::tftp;
 
 use crate::dhcp_options::*;
 use prelude::*;
@@ -105,7 +110,7 @@ fn main() {
 enum States {
     Discover,
     Request(u32),
-    TFTP,
+    Tftp,
     Done,
 }
 
@@ -136,6 +141,13 @@ where
 
     // State machine
     let mut state = States::Discover;
+
+    // Tftp connections
+    // let transfer = TestTftp {
+    //     file: File::open("target/kernel.elf").unwrap(),
+    // };
+
+    let mut transfers: BTreeMap<IpEndpoint, TestTftp> = BTreeMap::new();
 
     loop {
         let time = Instant::now();
@@ -284,9 +296,91 @@ where
                 (port assigned in Boot Server Ack packet). The file downloaded and the placement of the
                 downloaded code in memory is dependent on the client’s CPU architecture.
                 */
-                state = States::TFTP;
+                state = States::Tftp;
             }
-            States::TFTP => {
+            States::Tftp => {
+                let info = match rx_token.consume(|buffer| {
+                    let (udp, src_endpoint) = crate::utils::unicast_ether_to_udp(
+                        buffer,
+                        &server_mac,
+                        &server_ip,
+                        tftp_endpoint.port,
+                    )?;
+
+                    log::info!("Received udp packet from {}", src_endpoint);
+                    let tftp_packet = tftp::Packet::new_checked(udp.payload())
+                        .map_err(|e| Error::Ignore(f!("Invalid tftp packet: {}", e)))?;
+
+                    log::info!("Parsed tftp packet");
+                    let tftp_repr = tftp::Repr::parse(&tftp_packet)
+                        .map_err(|e| Error::Ignore(f!("Invalid tftp packet: {}", e)))?;
+
+                    log::info!("Parsed tftp packet to repr");
+                    let is_write = tftp_packet.opcode() == tftp::OpCode::Write;
+
+                    let xfer_idx = transfers.get(&src_endpoint);
+
+                    use tftp::Repr;
+
+                    match (tftp_repr, xfer_idx) {
+                        (Repr::ReadRequest { .. }, Some(_))
+                        | (Repr::WriteRequest { .. }, Some(_)) => {
+                            log::error!(
+                                "tftp: multiple connections attempt from: {}",
+                                src_endpoint
+                            );
+                            return Err(Error::Ignore("Multiple connections attempt".to_string()));
+                        }
+                        (Repr::WriteRequest { filename, mode }, None)
+                        | (Repr::ReadRequest { filename, mode }, None) => {
+                            if mode != tftp::Mode::Octet {
+                                log::error!("Only octet mode is supported");
+                                return Err(Error::Ignore(
+                                    "Only octet mode is supported".to_string(),
+                                ));
+                            }
+
+                            let xfer_idx = TestTftp {
+                                file: File::open("target/kernel.elf").unwrap(),
+                            };
+
+                            transfers.insert(src_endpoint, xfer_idx);
+
+                            log::debug!("tftp: request for file: {}", filename);
+                            log::debug!(
+                                "tftp: {} request from: {}",
+                                if is_write { "write" } else { "read" },
+                                src_endpoint
+                            );
+                        }
+                        (Repr::Data { block_num, data }, Some(_)) => todo!(),
+                        (Repr::Ack { block_num }, Some(_)) => todo!(),
+                        (Repr::Data { .. }, None) | (Repr::Ack { .. }, None) => {
+                            log::error!("Data packet without active transfer");
+                            return Err(Error::Ignore(
+                                "Data packet without active transfer".to_string(),
+                            ));
+                        }
+                        (Repr::Error { code, msg }, None | Some(_)) => {
+                            log::error!("tftp: error: {}", msg);
+                            return Err(Error::Ignore(f!("tftp: error: {}", msg)));
+                        }
+                    };
+
+                    Ok(0)
+                }) {
+                    Ok(info) => info,
+                    Err(Error::IgnoreNoLog(e)) => {
+                        trace!("Ignoring packet. Reason: {}", e);
+                        continue;
+                    }
+                    Err(Error::Ignore(e)) => {
+                        debug!("Ignoring packet. Reason: {}", e);
+                        continue;
+                    }
+                    Err(e) => panic!("Error: {}", e),
+                };
+
                 state = States::Discover;
             }
             States::Done => todo!(),

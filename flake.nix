@@ -15,9 +15,13 @@
       url = "github:luis-hebendanz/smoltcp/pxe_2";
       flake = false;
     };
+    smolapps = {
+      url = "github:luis-hebendanz/smolapps";
+      flake = false;
+    };
   };
 
-  outputs = { self, nixpkgs, utils, nix-fenix, smoltcp, nix-pre-commit-hooks, ... }:
+  outputs = { self, nixpkgs, utils, nix-fenix, smoltcp, smolapps, nix-pre-commit-hooks, ... }:
     utils.lib.eachDefaultSystem (system:
       let
         overlays = [ nix-fenix.overlays.default ];
@@ -41,7 +45,9 @@
           paths = [ self ];
           postBuild = ''
             rm -rf $out/external/smoltcp
+            rm -rf $out/external/smolapps
             ln -sf ${smoltcp} $out/external/smoltcp
+            ln -sf ${smolapps} $out/external/smolapps
           '';
         };
         buildDeps = with pkgs; [

@@ -244,6 +244,12 @@ dependencies = [
 
 [[package]]
 name = "managed"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c75de51135344a4f8ed3cfe2720dc27736f7711989703a0b43aadf3753c55577"
+
+[[package]]
+name = "managed"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ca88d725a0a943b096803bd34e73a4437208b6077654cc4ecb2947a5f91618d"
@@ -403,6 +409,7 @@ dependencies = [
  "modular-bitfield",
  "ouroboros",
  "rand",
+ "smolapps",
  "smoltcp",
  "thiserror",
  "uuid",
@@ -444,6 +451,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bebd363326d05ec3e2f532ab7660680f3b02130d780c299bca73469d521bc0ed"
 
 [[package]]
+name = "smolapps"
+version = "0.1.4"
+dependencies = [
+ "byteorder",
+ "managed 0.7.2",
+ "smoltcp",
+]
+
+[[package]]
 name = "smoltcp"
 version = "0.9.1"
 dependencies = [
@@ -454,7 +470,7 @@ dependencies = [
  "heapless",
  "libc",
  "log",
- "managed",
+ "managed 0.8.0",
 ]
 
 [[package]]

@@ -10,6 +10,7 @@ use smoltcp::wire::EthernetAddress;
 use smoltcp::wire::EthernetFrame;
 use smoltcp::wire::EthernetProtocol;
 use smoltcp::wire::EthernetRepr;
+use smoltcp::wire::IpEndpoint;
 use smoltcp::wire::IpProtocol;
 use smoltcp::wire::Ipv4Repr;
 use smoltcp::wire::UdpRepr;
@@ -108,6 +109,52 @@ pub fn unicast_ether_to_dhcp<'a>(
         }
     };
     Ok(dhcp)
+}
+
+pub fn unicast_ether_to_udp<'a>(
+    buffer: &'a [u8],
+    server_mac: &'a EthernetAddress,
+    server_ip: &'a Ipv4Address,
+    server_port: u16,
+) -> Result<(UdpPacket<&'a [u8]>, IpEndpoint)> {
+    let ether = EthernetFrame::new_checked(buffer).unwrap();
+    if ether.dst_addr() != *server_mac {
+        return Err(Error::IgnoreNoLog(
+            "Mac address does not match with ours. And isn't broardcast".to_string(),
+        ));
+    }
+
+    let ipv4 = match Ipv4Packet::new_checked(ether.payload()) {
+        Ok(i) => i,
+        Err(e) => {
+            let err = format!("Parsing ipv4 packet failed: {}", e);
+            return Err(Error::IgnoreNoLog(err));
+        }
+    };
+
+    if ipv4.dst_addr() != *server_ip {
+        return Err(Error::IgnoreNoLog(
+            "IP destination does not match our server ip".to_string(),
+        ));
+    }
+
+    let udp = match UdpPacket::new_checked(ipv4.payload()) {
+        Ok(u) => u,
+        Err(e) => {
+            let err = format!("Parsing udp packet failed: {}", e);
+            return Err(Error::IgnoreNoLog(err));
+        }
+    };
+
+    if udp.dst_port() != 69 {
+        //TODO: Can we change this port?
+        return Err(Error::Ignore(
+            "Not a TFTP packet. Port does not match".to_string(),
+        ));
+    }
+
+    let src_endpoint = IpEndpoint::new(ipv4.src_addr().into_address(), udp.src_port());
+    Ok((udp, src_endpoint))
 }
 
 pub fn dhcp_to_ether_brdcast<'a>(

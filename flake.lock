@@ -134,6 +134,7 @@
         "nix-fenix": "nix-fenix",
         "nix-pre-commit-hooks": "nix-pre-commit-hooks",
         "nixpkgs": "nixpkgs",
+        "smolapps": "smolapps",
         "smoltcp": "smoltcp",
         "utils": "utils"
       }
@@ -152,6 +153,22 @@
         "owner": "rust-lang",
         "ref": "nightly",
         "repo": "rust-analyzer",
+        "type": "github"
+      }
+    },
+    "smolapps": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1590391551,
+        "narHash": "sha256-sRv1ZXxCGa8QYl+KMIQtfjNP2ScUJhw9vegOk+m/Ii8=",
+        "owner": "luis-hebendanz",
+        "repo": "smolapps",
+        "rev": "d8c9b31fff30b0b6aa907b2461ef1b05b098677b",
+        "type": "github"
+      },
+      "original": {
+        "owner": "luis-hebendanz",
+        "repo": "smolapps",
         "type": "github"
       }
     },
