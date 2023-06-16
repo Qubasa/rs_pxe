@@ -25,7 +25,7 @@ pub enum Error {
     #[error("Ignore")]
     Ignore(String),
 
-    #[error("Ignore no log")]
+    #[error("Ignore no log: {0}")]
     IgnoreNoLog(String),
 
     #[error("Tftp errror: {0}")]

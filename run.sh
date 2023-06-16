@@ -19,7 +19,7 @@ function reset_net {
 }
 function ctrl_c() {
     echo "** Trapped CTRL-C"
- #   reset_net
+#    reset_net
     pkill rs_pxe || true
 }
 function setup_net {
@@ -42,7 +42,7 @@ export RUST_BACKTRACE=1
 pkill rs_pxe || true
 cargo build
 sudo setcap cap_net_admin,cap_net_raw=eip ./target/debug/rs_pxe
-./target/debug/rs_pxe --raw "$LAN" --mac "98:fa:9b:4b:b2:c4" --ip "192.168.178.65" & # --mac "18:70:75:7B:3F:FE"
+./target/debug/rs_pxe --raw "$LAN" --mac "98:fa:9b:4b:b2:c4" --ip "192.168.178.96" & # --mac "18:70:75:7B:3F:FE"
 #qemu-system-x86_64 -enable-kvm -m 1024 -net nic -net tap,ifname="$TAPIF",script=no,downscript=no -cdrom ipxe.iso -serial stdio -display none 
 EOF
 )

@@ -5,6 +5,7 @@ use crate::parse::PxeClientInfo;
 use crate::prelude::*;
 
 use log::*;
+use smolapps::wire::tftp;
 use smoltcp::iface::Config;
 use smoltcp::iface::Routes;
 use smoltcp::phy::wait as phy_wait;
@@ -133,6 +134,8 @@ pub fn pxe_offer(info: &PxeClientInfo, server_ip: &Ipv4Address) -> DhcpReprWrapp
     let vendor_id = VendorClassIdentifier::try_from("PXEClient".as_bytes()).unwrap();
     let server_id = PxeServerIdentifier::try_from(server_ip.clone().as_bytes()).unwrap();
 
+    //TODO: If the ip is incorrect we get a difficult to debug error ARP timeout on the client
+    // Maybe use vendor option to specify the correct IP?
     let vendor_options: Vec<VendorOption> = {
         let pxe_discover_control = PxeDiscoverControl::new()
             .with_disable_broadcast(false)
