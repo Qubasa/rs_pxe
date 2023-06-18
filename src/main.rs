@@ -11,6 +11,8 @@ use log::*;
 use rs_pxe::tftp_state::Handle;
 use rs_pxe::tftp_state::TestTftp;
 use rs_pxe::tftp_state::Transfer;
+use smolapps::wire::tftp::TftpOption;
+use smolapps::wire::tftp::TftpOptsReader;
 use smoltcp::iface::Config;
 use smoltcp::iface::Routes;
 use smoltcp::phy::wait as phy_wait;
@@ -39,6 +41,7 @@ use smoltcp::wire::UdpPacket;
 use smoltcp::{iface::Interface, phy::ChecksumCapabilities};
 use std::borrow::BorrowMut;
 use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fs::File;
 use std::io::Read;
@@ -406,12 +409,65 @@ where
                                 if is_write { "write" } else { "read" },
                                 src_endpoint
                             );
-                            let options = opts.options().collect::<Vec<_>>();
+                            let options = {
+                                let mut map = HashMap::new();
+                                for opt in opts.options() {
+                                    map.insert(opt.name, opt.value);
+                                }
+                                map
+                            };
                             log::info!("tftp options: {:?}", options);
 
                             if is_write {
                                 transfers.remove(&src_endpoint);
                                 return Err(Error::Tftp("Write not supported".to_string()));
+                            }
+                            let src_ip = Ipv4Address::from_bytes(src_endpoint.addr.as_bytes());
+
+                            if let Some(&tsize) = options.get("tsize") {
+                                if tsize != "0" {
+                                    return Err(Error::Tftp(f!(
+                                        "tftp: tsize option should be zero is however {}",
+                                        tsize
+                                    )));
+                                }
+
+                                let tsize = match t.handle.file.metadata() {
+                                    Ok(metadata) => metadata.len(),
+                                    Err(e) => {
+                                        return Err(Error::Tftp(f!(
+                                            "tftp: error getting file size: {}",
+                                            e
+                                        )));
+                                    }
+                                };
+
+                                let tsize_response = tsize.to_string();
+
+                                let mut opt_buf = vec![];
+                                let opts = {
+                                    let opt = TftpOption {
+                                        name: "tsize",
+                                        value: &tsize_response,
+                                    };
+                                    log::info!("opt_buf size before: {}", opt_buf.len());
+                                    opt_buf.resize(opt.len(), 0);
+                                    log::info!("opt_buf size after: {}", opt_buf.len());
+                                    let mut opt_resp = tftp::TftpOptsWriter::new(&mut opt_buf);
+                                    opt_resp.emit(opt).unwrap();
+                                    tftp::TftpOptsReader::new(&opt_buf)
+                                };
+
+                                let ack = Repr::OptionAck { opts };
+                                utils::tftp_to_ether_unicast(
+                                    buffer,
+                                    &ack,
+                                    &src_ip,
+                                    &src_mac_addr,
+                                    &server_ip,
+                                    &server_mac,
+                                    udp.src_port(),
+                                );
                             } else {
                                 let s = &mut t.last_data.as_mut().unwrap()[..];
                                 t.last_len = match t.handle.read(s) {
@@ -427,7 +483,7 @@ where
                                     block_num: t.block_num,
                                     data: &t.last_data.unwrap()[..t.last_len],
                                 };
-                                let src_ip = Ipv4Address::from_bytes(src_endpoint.addr.as_bytes());
+
                                 log::debug!("Sending tftp data packet");
                                 utils::tftp_to_ether_unicast(
                                     buffer,

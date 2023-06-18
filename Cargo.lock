@@ -455,6 +455,7 @@ name = "smolapps"
 version = "0.1.4"
 dependencies = [
  "byteorder",
+ "log",
  "managed 0.7.2",
  "smoltcp",
 ]
