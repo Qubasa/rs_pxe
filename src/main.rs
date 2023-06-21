@@ -10,6 +10,7 @@ mod utils;
 use log::*;
 use rs_pxe::tftp_state::Handle;
 use rs_pxe::tftp_state::TestTftp;
+use rs_pxe::tftp_state::TftpConnection;
 use rs_pxe::tftp_state::Transfer;
 use smolapps::wire::tftp::TftpOption;
 use smolapps::wire::tftp::TftpOptsReader;
@@ -113,11 +114,20 @@ fn main() {
     };
 }
 
-enum States {
+#[derive(Debug)]
+enum PxeStates {
     Discover,
     Request(u32),
-    Tftp,
-    TftpError(String),
+    Tftp(TftpStates),
+    Done,
+}
+
+#[derive(Debug)]
+pub enum TftpStates {
+    Tsize,
+    BlkSize,
+    Data { blksize: usize },
+    Error,
     Done,
 }
 
@@ -147,14 +157,14 @@ where
     };
 
     // State machine
-    let mut state = States::Discover;
+    let mut state = PxeStates::Discover;
 
     // Tftp connections
     // let transfer = TestTftp {
     //     file: File::open("target/kernel.elf").unwrap(),
     // };
 
-    let mut transfers: BTreeMap<IpEndpoint, Transfer<TestTftp>> = BTreeMap::new();
+    let mut transfers: HashMap<TftpConnection, Transfer<TestTftp>> = HashMap::new();
 
     loop {
         let time = Instant::now();
@@ -162,7 +172,7 @@ where
         let (rx_token, tx_token) = device.receive(time).unwrap();
 
         match state {
-            States::Discover => {
+            PxeStates::Discover => {
                 /* ================== Parse PXE Discover ================== */
                 /*
                 Step 1. The client broadcasts a DHCPDISCOVER message to the standard DHCP port (67).
@@ -228,9 +238,9 @@ where
                 an acknowledgment from the Service. If the client selects an IP address from a BOOTP reply, it can
                 simply use the address.
                 */
-                state = States::Request(info.transaction_id);
+                state = PxeStates::Request(info.transaction_id);
             }
-            States::Request(transaction_id) => {
+            PxeStates::Request(transaction_id) => {
                 /*  ================== Parse PXE Request ================== */
                 /*
                 Step 5. The client selects and discovers a Boot Server. This packet may be sent broadcast (port 67),
@@ -303,235 +313,69 @@ where
                 (port assigned in Boot Server Ack packet). The file downloaded and the placement of the
                 downloaded code in memory is dependent on the client’s CPU architecture.
                 */
-                state = States::Tftp;
+                state = PxeStates::Tftp(TftpStates::Tsize);
             }
-            States::Tftp => {
-                let mut packet_buf: Vec<u8> = vec![];
-                rx_token
-                    .consume(|buffer| {
-                        packet_buf = buffer.to_vec();
-                        Ok::<(), Error>(())
-                    })
-                    .unwrap();
-
-                let (udp, src_endpoint, src_mac_addr) = match crate::utils::unicast_ether_to_udp(
-                    packet_buf.as_slice(),
-                    &server_mac,
-                    &server_ip,
-                    tftp_endpoint.port,
-                ) {
-                    Ok((udp, src_endpoint, src_mac_addr)) => (udp, src_endpoint, src_mac_addr),
-                    Err(Error::IgnoreNoLog(e)) => {
-                        trace!("Ignoring packet. Reason: {}", e);
-                        continue;
-                    }
-                    Err(Error::Ignore(e)) => {
-                        debug!("Ignoring packet. Reason: {}", e);
-                        continue;
-                    }
-                    Err(e) => panic!("Error: {}", e),
-                };
-
-                log::info!("Received udp packet from {}", src_endpoint);
-                let tftp_packet = match tftp::Packet::new_checked(udp.payload()) {
-                    Ok(packet) => packet,
-                    Err(e) => {
-                        log::trace!("tftp: invalid packet: {}", e);
-                        continue;
-                    }
-                };
-
-                log::info!("Parsed tftp packet");
-                let tftp_repr = match tftp::Repr::parse(&tftp_packet) {
-                    Ok(repr) => repr,
-                    Err(e) => {
-                        log::error!("tftp: invalid packet: {}", e);
-                        continue;
-                    }
-                };
-
-                log::info!("Parsed tftp packet to repr");
-                let is_write = tftp_packet.opcode() == tftp::OpCode::Write;
-
-                match tx_token.consume(562 - 4, |buffer| {
-                    let xfer_idx = transfers.get(&src_endpoint);
-
-                    use tftp::Repr;
-
-                    match (tftp_repr, xfer_idx) {
-                        (Repr::ReadRequest { .. }, Some(_))
-                        | (Repr::WriteRequest { .. }, Some(_)) => {
-                            log::error!(
-                                "tftp: multiple connections attempt from: {}",
-                                src_endpoint
-                            );
-                            return Err(Error::Ignore("Multiple connections attempt".to_string()));
+            PxeStates::Tftp(ref tftp_state) => {
+                let (tftp_con, wrapper) =
+                    match tftp_state::recv_tftp(rx_token, &server_mac, &server_ip) {
+                        Ok(info) => info,
+                        Err(Error::IgnoreNoLog(e)) => {
+                            trace!("Ignoring packet. Reason: {}", e);
+                            continue;
                         }
-                        (
-                            Repr::WriteRequest {
-                                filename,
-                                mode,
-                                opts,
-                            },
-                            None,
-                        )
-                        | (
-                            Repr::ReadRequest {
-                                filename,
-                                mode,
-                                opts,
-                            },
-                            None,
-                        ) => {
-                            if mode != tftp::Mode::Octet {
-                                return Err(Error::Tftp(
-                                    "Only octet mode is supported".to_string(),
-                                ));
-                            }
-
-                            let t = match transfers.get_mut(&src_endpoint) {
-                                Some(transfer) => transfer,
-                                None => {
-                                    let xfer_idx = TestTftp {
-                                        file: File::open("target/kernel.elf").unwrap(),
-                                    };
-
-                                    let transfer = Transfer::new(xfer_idx, src_endpoint, is_write);
-
-                                    transfers.insert(src_endpoint, transfer);
-                                    transfers.get_mut(&src_endpoint).unwrap()
-                                }
-                            };
-
-                            log::debug!("tftp: request for file: {}", filename);
-                            log::debug!(
-                                "tftp: {} request from: {}",
-                                if is_write { "write" } else { "read" },
-                                src_endpoint
-                            );
-                            let options = {
-                                let mut map = HashMap::new();
-                                for opt in opts.options() {
-                                    map.insert(opt.name, opt.value);
-                                }
-                                map
-                            };
-                            log::info!("tftp options: {:?}", options);
-
-                            if is_write {
-                                transfers.remove(&src_endpoint);
-                                return Err(Error::Tftp("Write not supported".to_string()));
-                            }
-                            let src_ip = Ipv4Address::from_bytes(src_endpoint.addr.as_bytes());
-
-                            if let Some(&tsize) = options.get("tsize") {
-                                if tsize != "0" {
-                                    return Err(Error::Tftp(f!(
-                                        "tftp: tsize option should be zero is however {}",
-                                        tsize
-                                    )));
-                                }
-
-                                let tsize = match t.handle.file.metadata() {
-                                    Ok(metadata) => metadata.len(),
-                                    Err(e) => {
-                                        return Err(Error::Tftp(f!(
-                                            "tftp: error getting file size: {}",
-                                            e
-                                        )));
-                                    }
-                                };
-
-                                let tsize_response = tsize.to_string();
-
-                                let mut opt_buf = vec![];
-                                let opts = {
-                                    let opt = TftpOption {
-                                        name: "tsize",
-                                        value: &tsize_response,
-                                    };
-                                    log::info!("opt_buf size before: {}", opt_buf.len());
-                                    opt_buf.resize(opt.len(), 0);
-                                    log::info!("opt_buf size after: {}", opt_buf.len());
-                                    let mut opt_resp = tftp::TftpOptsWriter::new(&mut opt_buf);
-                                    opt_resp.emit(opt).unwrap();
-                                    tftp::TftpOptsReader::new(&opt_buf)
-                                };
-
-                                let ack = Repr::OptionAck { opts };
-                                utils::tftp_to_ether_unicast(
-                                    buffer,
-                                    &ack,
-                                    &src_ip,
-                                    &src_mac_addr,
-                                    &server_ip,
-                                    &server_mac,
-                                    udp.src_port(),
-                                );
-                            } else {
-                                let s = &mut t.last_data.as_mut().unwrap()[..];
-                                t.last_len = match t.handle.read(s) {
-                                    Ok(len) => len,
-                                    Err(e) => {
-                                        return Err(Error::Tftp(f!(
-                                            "tftp: error reading file: {}",
-                                            e
-                                        )));
-                                    }
-                                };
-                                let data = Repr::Data {
-                                    block_num: t.block_num,
-                                    data: &t.last_data.unwrap()[..t.last_len],
-                                };
-
-                                log::debug!("Sending tftp data packet");
-                                utils::tftp_to_ether_unicast(
-                                    buffer,
-                                    &data,
-                                    &src_ip,
-                                    &src_mac_addr,
-                                    &server_ip,
-                                    &server_mac,
-                                    udp.src_port(),
-                                );
-                            }
+                        Err(Error::Ignore(e)) => {
+                            debug!("Ignoring packet. Reason: {}", e);
+                            continue;
                         }
-                        (Repr::Data { block_num, data }, Some(_)) => todo!(),
-                        (Repr::Ack { block_num }, Some(_)) => todo!(),
-                        (Repr::Data { .. }, None) | (Repr::Ack { .. }, None) => {
-                            log::error!("Data packet without active transfer");
-                            return Err(Error::Ignore(
-                                "Data packet without active transfer".to_string(),
-                            ));
-                        }
-                        (Repr::Error { code, msg }, None | Some(_)) => {
-                            log::error!("tftp: error: {}", msg);
-                            return Err(Error::Ignore(f!("tftp: error: {}", msg)));
-                        }
-                        (Repr::OptionAck { opts }, None) => todo!(),
-                        (Repr::OptionAck { opts }, Some(_)) => todo!(),
+                        Err(e) => panic!("Error: {}", e),
                     };
-                    Ok(())
-                }) {
-                    Ok(_) => {}
-                    Err(Error::IgnoreNoLog(e)) => {
-                        trace!("Ignoring packet. Reason: {}", e);
-                        continue;
+
+                match tftp_state {
+                    TftpStates::Tsize => {
+                        tftp_state::reply_tsize(tx_token, &wrapper, tftp_con, &mut transfers)
+                            .unwrap();
+
+                        state = PxeStates::Tftp(TftpStates::BlkSize);
                     }
-                    Err(Error::Ignore(e)) => {
-                        debug!("Ignoring packet. Reason: {}", e);
-                        continue;
+                    TftpStates::BlkSize => {
+                        let blksize = match tftp_state::reply_blksize(
+                            tx_token,
+                            &wrapper,
+                            tftp_con,
+                            &mut transfers,
+                        ) {
+                            Ok(blksize) => blksize,
+                            Err(Error::Ignore(e)) => {
+                                debug!("Ignoring packet. Reason: {}", e);
+                                continue;
+                            }
+                            Err(e) => panic!("Error: {}", e),
+                        };
+
+                        state = PxeStates::Tftp(TftpStates::Data { blksize })
                     }
-                    Err(e) => panic!("Error: {}", e),
-                };
+                    TftpStates::Data { blksize } => {
+                        let done = tftp_state::reply_data(
+                            tx_token,
+                            &wrapper,
+                            tftp_con,
+                            &mut transfers,
+                            *blksize,
+                        )
+                        .unwrap();
+
+                        if done {
+                            state = PxeStates::Tftp(TftpStates::Done);
+                        }
+                    }
+                    TftpStates::Error => todo!(),
+                    TftpStates::Done => log::info!("TFTP Done"),
+                }
 
                 //state = States::Discover;
             }
-            States::TftpError(e) => {
-                log::error!("Tftp error: {}", e);
-                state = States::Done;
-            }
-            States::Done => todo!(),
+
+            PxeStates::Done => todo!(),
         }
     }
 }

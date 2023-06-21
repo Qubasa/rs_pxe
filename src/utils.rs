@@ -2,9 +2,13 @@
 #![allow(unused_imports)]
 
 use crate::parse::PxeClientInfo;
+use crate::tftp_state::Handle;
+use crate::tftp_state::TftpConnection;
+use ouroboros::self_referencing;
 use smolapps::wire::tftp;
 use smoltcp::phy::Checksum;
 use smoltcp::phy::ChecksumCapabilities;
+use smoltcp::phy::RawSocket;
 use smoltcp::wire::DhcpPacket;
 use smoltcp::wire::DhcpRepr;
 use smoltcp::wire::EthernetAddress;
@@ -117,7 +121,6 @@ pub fn unicast_ether_to_udp<'a>(
     buffer: &'a [u8],
     server_mac: &'a EthernetAddress,
     server_ip: &'a Ipv4Address,
-    server_port: u16,
 ) -> Result<(UdpPacket<&'a [u8]>, IpEndpoint, EthernetAddress)> {
     let ether = EthernetFrame::new_checked(buffer).unwrap();
     if ether.dst_addr() != *server_mac {
@@ -260,34 +263,52 @@ pub fn dhcp_to_ether_unicast<'a>(
     );
 }
 
-pub fn tftp_to_ether_unicast<'a>(
-    buffer: &'a mut [u8],
-    tftp: &'a tftp::Repr<'a>,
-    ip_dst_addr: &'a Ipv4Address,
-    mac_dst_addr: &'a EthernetAddress,
-    server_ip: &'a Ipv4Address,
-    server_mac: &'a EthernetAddress,
-    dst_port: u16,
-) {
-    let mut checksum = ChecksumCapabilities::ignored();
-    checksum.ipv4 = Checksum::Both;
-    checksum.udp = Checksum::Both;
-
+pub fn calc_packet_size<'a>(tftp: &'a tftp::Repr<'a>, con: &'a TftpConnection) -> usize {
     let udp_packet = UdpRepr {
-        src_port: 69,
-        dst_port,
+        src_port: con.server_port,
+        dst_port: con.client_port,
     };
     let ip_packet = Ipv4Repr {
-        src_addr: *server_ip,
-        dst_addr: *ip_dst_addr,
+        src_addr: con.server_ip,
+        dst_addr: con.client_ip,
         hop_limit: 128,
         payload_len: tftp.buffer_len() + udp_packet.header_len(),
         next_header: IpProtocol::Udp,
     };
 
     let eth_packet = EthernetRepr {
-        dst_addr: *mac_dst_addr,
-        src_addr: *server_mac,
+        dst_addr: con.client_mac,
+        src_addr: con.server_mac,
+        ethertype: EthernetProtocol::Ipv4,
+    };
+
+    eth_packet.buffer_len() + ip_packet.buffer_len() + udp_packet.header_len() + tftp.buffer_len()
+}
+
+pub fn tftp_to_ether_unicast<'a>(
+    buffer: &'a mut [u8],
+    tftp: &'a tftp::Repr<'a>,
+    con: &'a TftpConnection,
+) {
+    let mut checksum = ChecksumCapabilities::ignored();
+    checksum.ipv4 = Checksum::Both;
+    checksum.udp = Checksum::Both;
+
+    let udp_packet = UdpRepr {
+        src_port: con.server_port,
+        dst_port: con.client_port,
+    };
+    let ip_packet = Ipv4Repr {
+        src_addr: con.server_ip,
+        dst_addr: con.client_ip,
+        hop_limit: 128,
+        payload_len: tftp.buffer_len() + udp_packet.header_len(),
+        next_header: IpProtocol::Udp,
+    };
+
+    let eth_packet = EthernetRepr {
+        dst_addr: con.client_mac,
+        src_addr: con.server_mac,
         ethertype: EthernetProtocol::Ipv4,
     };
 

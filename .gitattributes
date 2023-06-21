@@ -1,1 +1,2 @@
 ipxe.iso filter=lfs diff=lfs merge=lfs -text
+ipxe.pxe filter=lfs diff=lfs merge=lfs -text
