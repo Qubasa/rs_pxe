@@ -58,7 +58,7 @@ use rs_pxe::*;
 
 //RFC: https://datatracker.ietf.org/doc/html/rfc2132
 fn main() {
-    cli_opts::setup_logging("");
+    cli_opts::setup_logging();
     info!("Starting pxe....");
 
     let (mut opts, mut _free) = cli_opts::create_options();

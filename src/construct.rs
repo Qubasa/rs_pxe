@@ -136,15 +136,15 @@ pub fn pxe_offer(info: &PxeClientInfo, server_ip: &Ipv4Address) -> DhcpReprWrapp
 
     //TODO: If the ip is incorrect we get a difficult to debug error ARP timeout on the client
     // Maybe use vendor option to specify the correct IP?
-    let vendor_options: Vec<VendorOption> = {
-        let pxe_discover_control = PxeDiscoverControl::new()
-            .with_disable_broadcast(false)
-            .with_disable_multicast(false)
-            .with_direct_boot_file_download(false)
-            .with_only_pxe_boot_servers(false);
+    // let vendor_options: Vec<VendorOption> = {
+    //     let pxe_discover_control = PxeDiscoverControl::new()
+    //         .with_disable_broadcast(false)
+    //         .with_disable_multicast(false)
+    //         .with_direct_boot_file_download(false)
+    //         .with_only_pxe_boot_servers(false);
 
-        vec![pxe_discover_control.into()]
-    };
+    //     vec![pxe_discover_control.into()]
+    // };
 
     let options: Vec<DhcpOptionWrapper> = vec![
         info.client_identifier.clone().into(),

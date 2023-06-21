@@ -160,7 +160,6 @@ where
                     }
                     map
                 };
-                log::info!("tftp options: {:?}", options);
 
                 if let Some(&tsize) = options.get("tsize") {
                     if tsize != "0" {
@@ -246,12 +245,6 @@ where
                     transfers.get_mut(&tftp_con).unwrap()
                 };
 
-                log::debug!("tftp: request for file: {}", filename);
-                log::debug!(
-                    "tftp: {} request from: {:?}",
-                    if t.is_write { "write" } else { "read" },
-                    tftp_con
-                );
                 let options = {
                     let mut map = HashMap::new();
                     for opt in opts.options() {
@@ -259,7 +252,6 @@ where
                     }
                     map
                 };
-                log::info!("tftp options: {:?}", options);
 
                 if let Some(&blksize) = options.get("blksize") {
                     let blksize = match blksize.parse::<usize>() {
@@ -272,8 +264,9 @@ where
                         }
                     };
 
-                    let blksize_response = blksize.to_string();
+                    log::debug!("Acking blksize: {}", blksize);
 
+                    let blksize_response = blksize.to_string();
                     let mut opt_buf = [0u8; 64];
                     let opts = {
                         let opt = TftpOption {
@@ -288,8 +281,8 @@ where
                     };
 
                     let ack = Repr::OptionAck { opts };
+
                     let packet_size = crate::utils::calc_packet_size(&ack, &tftp_con);
-                    log::debug!("Calculated packet size: {}", packet_size);
                     tx_token.consume(packet_size, |buffer| {
                         crate::utils::tftp_to_ether_unicast(buffer, &ack, &tftp_con);
                     });
@@ -336,7 +329,7 @@ where
             };
 
             if bytes_read == 0 {
-                log::info!("end of file reached");
+                log::info!("End of file reached");
                 return Ok(true);
             }
 
@@ -344,11 +337,13 @@ where
                 block_num: block_num + 1,
                 data: &s.as_slice()[..bytes_read],
             };
-
-            log::debug!("Sending tftp data packet");
+            log::debug!(
+                "Sending data block {} of size {}",
+                block_num + 1,
+                bytes_read
+            );
 
             let packet_size = utils::calc_packet_size(&data, &tftp_con);
-            log::debug!("Calculated packet size: {}", packet_size);
             tx_token.consume(packet_size, |buffer| {
                 utils::tftp_to_ether_unicast(buffer, &data, &tftp_con);
             });
@@ -375,7 +370,6 @@ where
         let (udp, src_endpoint, src_mac_addr) =
             crate::utils::unicast_ether_to_udp(buffer, server_mac, server_ip)?;
 
-        log::info!("Received udp packet from {}", src_endpoint);
         let tftp_packet = match tftp::Packet::new_checked(udp.payload()) {
             Ok(packet) => packet,
             Err(e) => {
@@ -385,15 +379,12 @@ where
 
         let is_write = tftp_packet.opcode() == tftp::OpCode::Write;
 
-        log::info!("Parsed tftp packet");
         match tftp::Repr::parse(&tftp_packet) {
             Ok(repr) => repr,
             Err(e) => {
                 return Err(Error::Malformed(f!("tftp: invalid packet: {}", e)));
             }
         };
-
-        log::info!("Parsed tftp packet to repr");
 
         let client = TftpConnection {
             server_ip: *server_ip,

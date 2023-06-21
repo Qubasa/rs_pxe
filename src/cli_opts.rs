@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+use env_logger::fmt::Color;
 use env_logger::Builder;
 use getopts::{Matches, Options};
 use log::*;
@@ -16,48 +17,35 @@ use smoltcp::phy::{Device, FaultInjector, Medium, Tracer};
 use smoltcp::phy::{PcapMode, PcapWriter};
 use smoltcp::time::{Duration, Instant};
 
-pub fn setup_logging_with_clock<F>(filter: &str, since_startup: F)
-where
-    F: Fn() -> Instant + Send + Sync + 'static,
-{
+pub fn setup_logging() {
     Builder::new()
-        .format(move |buf, record| {
-            let elapsed = since_startup();
-            let timestamp = format!("[{}]", elapsed);
-            if record.target().starts_with("smoltcp::") {
-                writeln!(
-                    buf,
-                    "\x1b[0m{} ({}): {}\x1b[0m",
-                    timestamp,
-                    record.target().replace("smoltcp::", ""),
-                    record.args()
-                )
-            } else if record.level() == Level::Trace {
-                let message = format!("{}", record.args());
-                writeln!(
-                    buf,
-                    "\x1b[37m{} {}\x1b[0m",
-                    timestamp,
-                    message.replace('\n', "\n             ")
-                )
-            } else {
-                writeln!(
-                    buf,
-                    "\x1b[32m{} ({}): {}\x1b[0m",
-                    timestamp,
-                    record.target(),
-                    record.args()
-                )
-            }
+        .format(|buf, record| {
+            // Get the file name and line number from the record
+            let file = record.file().unwrap_or("unknown");
+            let line = record.line().unwrap_or(0);
+
+            // Get the color for the log level
+            let color = match record.level() {
+                Level::Error => Color::Red,
+                Level::Warn => Color::Yellow,
+                Level::Info => Color::Green,
+                Level::Debug => Color::Cyan,
+                Level::Trace => Color::White,
+            };
+
+            // Write the formatted output to the buffer
+            writeln!(
+                buf,
+                "{}:{} [{}] {}",
+                file,
+                line,
+                buf.style().set_color(color).value(record.level()),
+                record.args()
+            )
         })
         .filter(None, LevelFilter::Debug)
-        .parse_env(filter)
         .parse_env(&env::var("RUST_LOG").unwrap_or_else(|_| "".to_owned()))
         .init();
-}
-
-pub fn setup_logging(filter: &str) {
-    setup_logging_with_clock(filter, Instant::now)
 }
 
 pub fn create_options() -> (Options, Vec<&'static str>) {

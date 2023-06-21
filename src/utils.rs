@@ -325,8 +325,6 @@ pub fn tftp_to_ether_unicast<'a>(
         &ip_packet.dst_addr.into_address(),
         tftp.buffer_len(),
         |buf| {
-            log::debug!("tftp packet buffer len: {}", tftp.buffer_len());
-            log::debug!("Upd packet buffer len: {}", buf.len());
             let mut packet = tftp::Packet::new_unchecked(buf);
             tftp.emit(&mut packet).unwrap();
         },
