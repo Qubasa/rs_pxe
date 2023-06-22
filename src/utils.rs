@@ -162,11 +162,10 @@ pub fn unicast_ether_to_udp<'a>(
 }
 
 pub fn dhcp_to_ether_brdcast<'a>(
-    buffer: &'a mut [u8],
     dhcp: &'a DhcpRepr<'a>,
     server_ip: &'a Ipv4Address,
     server_mac: &'a EthernetAddress,
-) {
+) -> Vec<u8> {
     let mut checksum = ChecksumCapabilities::ignored();
     checksum.ipv4 = Checksum::Both;
     checksum.udp = Checksum::Both;
@@ -189,6 +188,13 @@ pub fn dhcp_to_ether_brdcast<'a>(
         ethertype: EthernetProtocol::Ipv4,
     };
 
+    let packet_size = eth_packet.buffer_len()
+        + ip_packet.buffer_len()
+        + udp_packet.header_len()
+        + dhcp.buffer_len();
+
+    let mut buffer = vec![0; packet_size];
+
     let mut packet = EthernetFrame::new_unchecked(&mut buffer[..]);
     eth_packet.emit(&mut packet);
 
@@ -209,16 +215,16 @@ pub fn dhcp_to_ether_brdcast<'a>(
         },
         &checksum,
     );
+    buffer
 }
 
 pub fn dhcp_to_ether_unicast<'a>(
-    buffer: &'a mut [u8],
     dhcp: &'a DhcpRepr<'a>,
     ip_dst_addr: &'a Ipv4Address,
     mac_dst_addr: &'a EthernetAddress,
     server_ip: &'a Ipv4Address,
     server_mac: &'a EthernetAddress,
-) {
+) -> Vec<u8> {
     let mut checksum = ChecksumCapabilities::ignored();
     checksum.ipv4 = Checksum::Both;
     checksum.udp = Checksum::Both;
@@ -241,6 +247,13 @@ pub fn dhcp_to_ether_unicast<'a>(
         ethertype: EthernetProtocol::Ipv4,
     };
 
+    let packet_size = eth_packet.buffer_len()
+        + ip_packet.buffer_len()
+        + udp_packet.header_len()
+        + dhcp.buffer_len();
+
+    let mut buffer = vec![0; packet_size];
+
     let mut packet = EthernetFrame::new_unchecked(&mut buffer[..]);
     eth_packet.emit(&mut packet);
 
@@ -261,35 +274,11 @@ pub fn dhcp_to_ether_unicast<'a>(
         },
         &checksum,
     );
+
+    buffer
 }
 
-pub fn calc_packet_size<'a>(tftp: &'a tftp::Repr<'a>, con: &'a TftpConnection) -> usize {
-    let udp_packet = UdpRepr {
-        src_port: con.server_port,
-        dst_port: con.client_port,
-    };
-    let ip_packet = Ipv4Repr {
-        src_addr: con.server_ip,
-        dst_addr: con.client_ip,
-        hop_limit: 128,
-        payload_len: tftp.buffer_len() + udp_packet.header_len(),
-        next_header: IpProtocol::Udp,
-    };
-
-    let eth_packet = EthernetRepr {
-        dst_addr: con.client_mac,
-        src_addr: con.server_mac,
-        ethertype: EthernetProtocol::Ipv4,
-    };
-
-    eth_packet.buffer_len() + ip_packet.buffer_len() + udp_packet.header_len() + tftp.buffer_len()
-}
-
-pub fn tftp_to_ether_unicast<'a>(
-    buffer: &'a mut [u8],
-    tftp: &'a tftp::Repr<'a>,
-    con: &'a TftpConnection,
-) {
+pub fn tftp_to_ether_unicast<'a>(tftp: &'a tftp::Repr<'a>, con: &'a TftpConnection) -> Vec<u8> {
     let mut checksum = ChecksumCapabilities::ignored();
     checksum.ipv4 = Checksum::Both;
     checksum.udp = Checksum::Both;
@@ -312,6 +301,13 @@ pub fn tftp_to_ether_unicast<'a>(
         ethertype: EthernetProtocol::Ipv4,
     };
 
+    let packet_size = eth_packet.buffer_len()
+        + ip_packet.buffer_len()
+        + udp_packet.header_len()
+        + tftp.buffer_len();
+
+    let mut buffer = vec![0; packet_size];
+
     let mut packet = EthernetFrame::new_unchecked(&mut buffer[..]);
     eth_packet.emit(&mut packet);
 
@@ -330,4 +326,5 @@ pub fn tftp_to_ether_unicast<'a>(
         },
         &checksum,
     );
+    buffer
 }

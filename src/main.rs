@@ -213,14 +213,12 @@ where
                 address field is null (0.0.0.0). If this is a DHCP Service, then the returned client IP address
                 field is valid.
                 */
-                tx_token.consume(500, |buffer| {
-                    let dhcp_repr = construct::pxe_offer(&info, &server_ip);
-                    utils::dhcp_to_ether_brdcast(
-                        buffer,
-                        dhcp_repr.borrow_repr(),
-                        &server_ip,
-                        &server_mac,
-                    );
+
+                let dhcp_repr = construct::pxe_offer(&info, &server_ip);
+                let packet =
+                    utils::dhcp_to_ether_brdcast(dhcp_repr.borrow_repr(), &server_ip, &server_mac);
+                tx_token.consume(packet.len(), |buffer| {
+                    buffer.copy_from_slice(&packet);
                 });
 
                 log::info!("Sent PXE Offer");
@@ -294,16 +292,16 @@ where
                     - MTFTP configuration parameters.
                     - Any other options the NBP requires before it can be successfully executed.
                 */
-                tx_token.consume(500, |buffer| {
-                    let dhcp_repr = construct::pxe_ack(&info, &tftp_endpoint);
-                    utils::dhcp_to_ether_unicast(
-                        buffer,
-                        dhcp_repr.borrow_repr(),
-                        &ip,
-                        &mac,
-                        &server_ip,
-                        &server_mac,
-                    );
+                let dhcp_repr = construct::pxe_ack(&info, &tftp_endpoint);
+                let packet = utils::dhcp_to_ether_unicast(
+                    dhcp_repr.borrow_repr(),
+                    &ip,
+                    &mac,
+                    &server_ip,
+                    &server_mac,
+                );
+                tx_token.consume(packet.len(), |buffer| {
+                    buffer.copy_from_slice(&packet);
                 });
 
                 log::info!("Sent PXE ACK");

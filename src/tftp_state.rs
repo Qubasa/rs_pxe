@@ -187,10 +187,10 @@ where
                     };
 
                     let ack = Repr::OptionAck { opts };
-                    let packet_size = crate::utils::calc_packet_size(&ack, &tftp_con);
-                    log::debug!("Calculated packet size: {}", packet_size);
-                    tx_token.consume(packet_size, |buffer| {
-                        crate::utils::tftp_to_ether_unicast(buffer, &ack, &tftp_con);
+                    let packet = crate::utils::tftp_to_ether_unicast(&ack, &tftp_con);
+
+                    tx_token.consume(packet.len(), |buffer| {
+                        buffer.copy_from_slice(&packet);
                     });
                 } else {
                     return Err(Error::Tftp("tftp: tsize option not found".to_string()));
@@ -282,9 +282,10 @@ where
 
                     let ack = Repr::OptionAck { opts };
 
-                    let packet_size = crate::utils::calc_packet_size(&ack, &tftp_con);
-                    tx_token.consume(packet_size, |buffer| {
-                        crate::utils::tftp_to_ether_unicast(buffer, &ack, &tftp_con);
+                    let packet = crate::utils::tftp_to_ether_unicast(&ack, &tftp_con);
+
+                    tx_token.consume(packet.len(), |buffer| {
+                        buffer.copy_from_slice(&packet);
                     });
                     Ok(blksize)
                 } else {
@@ -343,9 +344,10 @@ where
                 bytes_read
             );
 
-            let packet_size = utils::calc_packet_size(&data, &tftp_con);
-            tx_token.consume(packet_size, |buffer| {
-                utils::tftp_to_ether_unicast(buffer, &data, &tftp_con);
+            let packet = crate::utils::tftp_to_ether_unicast(&data, &tftp_con);
+
+            tx_token.consume(packet.len(), |buffer| {
+                buffer.copy_from_slice(&packet);
             });
             Ok(false)
         }
