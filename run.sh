@@ -1,31 +1,28 @@
 #!/usr/bin/env bash
 
 set -euo pipefail
- 
 set -x
 
 
 BRIDGE=kmania_br0
-TAPIF=kmania_tap0
-TAPIF1=kmania_tap1
-IF1_MAC="18:70:75:7B:3F:FE"
-TAPIF2=kmania_tap2
+QEMU_IF=kmania_tap0
+QEMU_MAC="52:55:00:d1:55:01"
+RUST_IF=kmania_tap1
+RUST_MAC="18:70:75:7B:3F:FE"
+
 
 function reset_net {
  # sudo dhcpcd -k $TAPIF1
  # sudo dhcpcd -x $TAPIF1 # Tell dhcpcd to stop
   sudo pkill dhcpd || true
-  sudo ip link set "$TAPIF" down
-  sudo ip link set "$TAPIF1" down
-  sudo ip link set "$TAPIF2" down
-  sudo ip link set $BRIDGE down
-  sudo brctl delif $BRIDGE "$TAPIF"
-  sudo brctl delif $BRIDGE "$TAPIF1"
-  sudo brctl delif $BRIDGE "$TAPIF2"
-  sudo brctl delbr $BRIDGE
-  sudo ip tuntap del dev "$TAPIF" mode tap
-  sudo ip tuntap del dev "$TAPIF1" mode tap
-  sudo ip tuntap del dev "$TAPIF2" mode tap
+  sudo ip link set "$QEMU_IF" down || true
+  sudo ip link set "$RUST_IF" down || true
+  sudo ip link set $BRIDGE down || true
+  sudo brctl delif $BRIDGE "$QEMU_IF" || true
+  sudo brctl delif $BRIDGE "$RUST_IF" || true
+  sudo brctl delbr $BRIDGE || true
+  sudo ip tuntap del dev "$QEMU_IF" mode tap || true
+  sudo ip tuntap del dev "$RUST_IF" mode tap || true
 }
 function ctrl_c() {
     echo "** Trapped CTRL-C"
@@ -33,21 +30,29 @@ function ctrl_c() {
     reset_net
 }
 function setup_net {
-  sudo ip tuntap add dev "$TAPIF" mode tap user "$USER"
-  sudo ip tuntap add dev "$TAPIF1" mode tap user "$USER"
-  sudo ip tuntap add dev "$TAPIF2" mode tap user "$USER"
+  sudo ip tuntap add dev "$QEMU_IF" mode tap user "$USER"
+  sudo ip tuntap add dev "$RUST_IF" mode tap user "$USER"
+
   sudo brctl addbr $BRIDGE &> /dev/null
-  sudo brctl addif $BRIDGE $TAPIF1 &> /dev/null
-  sudo brctl addif $BRIDGE $TAPIF2 &> /dev/null
-  sudo brctl addif $BRIDGE "$TAPIF"
+  sudo brctl addif $BRIDGE "$RUST_IF" &> /dev/null
+  sudo brctl addif $BRIDGE "$QEMU_IF"  &> /dev/null
   sudo ip link set $BRIDGE up
-  sudo ip link set $TAPIF2 up
-  sudo ip link set $TAPIF1 up
-  sudo ip link set "$TAPIF" up
+
+  sudo ip link set address $RUST_MAC dev "$RUST_IF"
+  sudo ip link set address $QEMU_MAC dev "$QEMU_IF"
+
+  sudo ip link set "$RUST_IF" up
+  sudo ip link set "$QEMU_IF" up
   sudo ip address add 192.168.33.1/24 broadcast 192.168.33.255 dev kmania_br0
-  #sudo ip addr add 192.168.33.111/24 dev $TAPIF1
-  sudo ip link set address $IF1_MAC dev $TAPIF1
-  sudo dhcpd -cf ./dhcpcd.conf -lf ./dhcpcd.lease # -d & # -b $BRIDGE 
+
+
+  #sudo bridge fdb add $RUST_MAC dev kmania_br0 dst 192.168.33.111
+  #sudo ip addr add 192.168.33.111/24 dev "$RUST_IF"
+  #sudo sysctl -w net.ipv4.conf."$RUST_IF".proxy_arp=1
+  #sudo arp -s 192.168.33.111 $RUST_MAC -i "$RUST_IF"
+
+
+  sudo dhcpd -cf ./dhcpcd.conf -lf ./dhcpcd.lease # -d & # -b $BRIDGE
  # sudo dhcpcd -n $TAPIF1 &
 }
 
@@ -59,12 +64,15 @@ PAYLOAD=$(cat <<EOF
 set -xe
 export RUST_BACKTRACE=1
 pkill rs_pxe || true
+pkill qemu_ipxe || true
 rm -f ./target/debug/rs_pxe
 cargo build
 sudo setcap cap_net_admin,cap_net_raw=eip ./target/debug/rs_pxe
-./target/debug/rs_pxe --raw "$TAPIF1"  --mac "$IF1_MAC" --ip "192.168.33.111" & # --mac "98:fa:9b:4b:b2:c4" 
-qemu-system-x86_64 -enable-kvm -m 1024 -net nic -net tap,ifname="$TAPIF",script=no,downscript=no -fda ipxe.dsk -snapshot -serial stdio -display none 
+./target/debug/rs_pxe --tap "$RUST_IF"  --mac "$RUST_MAC" --ip "192.168.33.111" &
+qemu-system-x86_64 -enable-kvm -m 1024 -name qemu_ipxe,process=qemu_ipxe -net nic -net tap,ifname="$QEMU_IF",script=no,downscript=no -fda ipxe.dsk -snapshot -serial stdio -display none 
 EOF
 )
+
+
 # correct way is to run dhcp server on tapif1 and have raw socket mode enabled?
 cargo watch -- bash -c "$PAYLOAD"
