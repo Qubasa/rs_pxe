@@ -1,5 +1,5 @@
 /target
-dhcpd.lease.*
+dhcpcd.lease*
 .pre-commit-config.yaml
 result
 .direnv
