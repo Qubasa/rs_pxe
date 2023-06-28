@@ -255,7 +255,7 @@ where
                 */
                 let (info, ip, mac) = match rx_token.consume(|buffer| {
                     let dhcp =
-                        crate::utils::unicast_ether_to_dhcp(buffer, &server_mac, &server_ip)?;
+                        crate::utils::uni_broad_ether_to_dhcp(buffer, &server_mac, &server_ip)?;
 
                     let info = rs_pxe::parse::pxe_discover(dhcp)?;
 

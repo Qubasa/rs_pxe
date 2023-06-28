@@ -62,6 +62,7 @@
           rust-analyzer-nightly
           pixiecore
           dhcpcd
+          dhcp
         ];
       in
       rec {

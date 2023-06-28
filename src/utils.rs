@@ -67,13 +67,13 @@ pub fn broadcast_ether_to_dhcp(buffer: &[u8]) -> Result<DhcpPacket<&[u8]>> {
     Ok(dhcp)
 }
 
-pub fn unicast_ether_to_dhcp<'a>(
+pub fn uni_broad_ether_to_dhcp<'a>(
     buffer: &'a [u8],
     server_mac: &'a EthernetAddress,
     server_ip: &'a Ipv4Address,
 ) -> Result<DhcpPacket<&'a [u8]>> {
     let ether = EthernetFrame::new_checked(buffer).unwrap();
-    if ether.dst_addr() != *server_mac {
+    if ether.dst_addr() != *server_mac && ether.dst_addr() != EthernetAddress::BROADCAST {
         return Err(Error::IgnoreNoLog(
             "Mac address does not match with ours. And isn't broardcast".to_string(),
         ));
@@ -87,7 +87,7 @@ pub fn unicast_ether_to_dhcp<'a>(
         }
     };
 
-    if ipv4.dst_addr() != *server_ip {
+    if ipv4.dst_addr() != *server_ip && ipv4.dst_addr() != Ipv4Address::BROADCAST {
         return Err(Error::IgnoreNoLog(
             "IP destination does not match our server ip".to_string(),
         ));
