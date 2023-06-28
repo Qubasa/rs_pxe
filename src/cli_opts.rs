@@ -17,7 +17,7 @@ use smoltcp::phy::{Device, FaultInjector, Medium, Tracer};
 use smoltcp::phy::{PcapMode, PcapWriter};
 use smoltcp::time::{Duration, Instant};
 
-pub fn setup_logging() {
+pub fn setup_logging(level: LevelFilter) {
     Builder::new()
         .format(|buf, record| {
             // Get the file name and line number from the record
@@ -30,7 +30,7 @@ pub fn setup_logging() {
                 Level::Warn => Color::Yellow,
                 Level::Info => Color::Green,
                 Level::Debug => Color::Cyan,
-                Level::Trace => Color::White,
+                Level::Trace => Color::Black,
             };
 
             // Write the formatted output to the buffer
@@ -43,7 +43,7 @@ pub fn setup_logging() {
                 record.args()
             )
         })
-        .filter(None, LevelFilter::Debug)
+        .filter(None, level)
         .parse_env(&env::var("RUST_LOG").unwrap_or_else(|_| "".to_owned()))
         .init();
 }
@@ -51,20 +51,15 @@ pub fn setup_logging() {
 pub fn create_options() -> (Options, Vec<&'static str>) {
     let mut opts = Options::new();
     opts.optflag("h", "help", "print this help menu");
-    opts.optopt("", "raw", "Interface to use", "enp2s0");
-    opts.optopt("", "tun", "TUN interface to use", "tun0");
-    opts.optopt("", "tap", "TAP interface to use", "tap0");
+    opts.optopt("i", "interface", "Interface to use", "enp2s0");
+    opts.optflag("", "raw", "Interface to use");
+    opts.optflag("", "tun", "TUN interface to use");
+    opts.optflag("", "tap", "TAP interface to use");
     opts.optopt(
-        "",
-        "ip",
-        "Ip address to give the interface",
-        "192.168.100.15",
-    );
-    opts.optopt(
-        "",
-        "mac",
-        "Mac address to give the interface",
-        "2A-22-53-43-11-59",
+        "l",
+        "level",
+        "debug level",
+        "[OFF, ERROR, WARN, INFO, DEBUG, TRACE]",
     );
     (opts, Vec::new())
 }
@@ -91,15 +86,5 @@ pub fn parse_options(options: &Options, free: Vec<&str>) -> Matches {
             }
             matches
         }
-    }
-}
-
-pub fn parse_tuntap_options(matches: &mut Matches) -> TunTapInterface {
-    let tun = matches.opt_str("tun");
-    let tap = matches.opt_str("tap");
-    match (tun, tap) {
-        (Some(tun), None) => TunTapInterface::new(&tun, Medium::Ip).unwrap(),
-        (None, Some(tap)) => TunTapInterface::new(&tap, Medium::Ethernet).unwrap(),
-        _ => panic!("You must specify exactly one of --tun or --tap"),
     }
 }

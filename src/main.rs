@@ -16,6 +16,7 @@ use smolapps::wire::tftp::TftpOption;
 use smolapps::wire::tftp::TftpOptsReader;
 use smoltcp::iface::Config;
 use smoltcp::iface::Routes;
+use smoltcp::iface::SocketSet;
 use smoltcp::phy::wait as phy_wait;
 use smoltcp::phy::Checksum;
 use smoltcp::phy::Device;
@@ -23,6 +24,7 @@ use smoltcp::phy::Medium;
 use smoltcp::phy::RawSocket;
 use smoltcp::phy::RxToken;
 use smoltcp::phy::TxToken;
+use smoltcp::socket::dhcpv4;
 use smoltcp::time::Duration;
 use smoltcp::time::Instant;
 use smoltcp::wire::DhcpMessageType;
@@ -37,6 +39,7 @@ use rand::prelude::*;
 use smoltcp::wire::IpAddress;
 use smoltcp::wire::IpCidr;
 use smoltcp::wire::Ipv4Address;
+use smoltcp::wire::Ipv4Cidr;
 use smoltcp::wire::Ipv4Packet;
 use smoltcp::wire::UdpPacket;
 use smoltcp::{iface::Interface, phy::ChecksumCapabilities};
@@ -58,22 +61,26 @@ use rs_pxe::*;
 
 //RFC: https://datatracker.ietf.org/doc/html/rfc2132
 fn main() {
-    cli_opts::setup_logging();
-    info!("Starting pxe....");
-
     let (mut opts, mut _free) = cli_opts::create_options();
 
     let mut matches = cli_opts::parse_options(&opts, _free);
-    let t = &matches.opt_str("mac").unwrap();
-    let hardware_addr: &EthernetAddress = &EthernetAddress::from_str(t).unwrap();
-    let t = &matches.opt_str("ip").unwrap();
-    let ip = &matches
-        .opt_get_default("ip", IpAddress::from_str(t).unwrap())
+
+    let v = match matches.opt_str("level") {
+        Some(v) => v,
+        None => "INFO".to_owned(),
+    };
+
+    let level_filter = LevelFilter::from_str(&v).unwrap();
+    cli_opts::setup_logging(level_filter);
+    info!("Starting pxe....");
+
+    let interface = matches.opt_str("interface").unwrap();
+    let mac = mac_address::mac_address_by_name(&interface)
+        .unwrap()
         .unwrap();
-    let ip_addrs = [IpCidr::new(*ip, 24)];
+    let hardware_addr: &EthernetAddress = &EthernetAddress::from_bytes(&mac.bytes());
 
     if matches.opt_present("raw") {
-        let interface = matches.opt_str("raw").unwrap();
         let mut device = RawSocket::new(&interface, Medium::Ethernet).unwrap();
 
         // Create interface
@@ -86,13 +93,11 @@ fn main() {
 
         let mut iface = Interface::new(config, &mut device);
 
-        iface.update_ip_addrs(|ip_addr| {
-            ip_addr.push(IpCidr::new(*ip, 24)).unwrap();
-        });
+        utils::request_dhcp_ip(&mut device, &mut iface);
 
         server(&mut device, &mut iface);
-    } else if matches.opt_present("tun") || matches.opt_present("tap") {
-        let mut device = cli_opts::parse_tuntap_options(&mut matches);
+    } else if matches.opt_present("tap") {
+        let mut device = smoltcp::phy::TunTapInterface::new(&interface, Medium::Ethernet).unwrap();
 
         // Create interface
         let mut config = match device.capabilities().medium {
@@ -103,11 +108,11 @@ fn main() {
         config.random_seed = rand::random();
         let mut iface = Interface::new(config, &mut device);
 
-        iface.update_ip_addrs(|ip_addr| {
-            ip_addr.push(IpCidr::new(*ip, 24)).unwrap();
-        });
+        utils::request_dhcp_ip(&mut device, &mut iface);
 
         server(&mut device, &mut iface);
+    } else if matches.opt_present("tun") {
+        todo!("Tun support not implemented yet");
     } else {
         let brief = "Either --raw or --tun or --tap must be specified";
         panic!("{}", opts.usage(brief));
@@ -118,6 +123,7 @@ fn main() {
 enum PxeStates {
     Discover,
     Request(u32),
+    ArpRequest,
     Tftp(TftpStates),
     Done,
 }
@@ -131,11 +137,11 @@ pub enum TftpStates {
     Done,
 }
 
-pub fn server<DeviceT: AsRawFd>(device: &mut DeviceT, iface: &mut Interface)
+pub fn server<DeviceT: AsRawFd>(device: &mut DeviceT, iface: &mut Interface) -> !
 where
     DeviceT: for<'d> Device,
 {
-    log::info!("Starting server");
+    log::info!("Starting server with ip: {}", iface.ipv4_addr().unwrap());
     let fd = device.as_raw_fd();
 
     // Get interface mac and ip
@@ -159,15 +165,11 @@ where
     // State machine
     let mut state = PxeStates::Discover;
 
-    // Tftp connections
-    // let transfer = TestTftp {
-    //     file: File::open("target/kernel.elf").unwrap(),
-    // };
-
     let mut transfers: HashMap<TftpConnection, Transfer<TestTftp>> = HashMap::new();
 
     loop {
         let time = Instant::now();
+
         phy_wait(fd, None).unwrap();
         let (rx_token, tx_token) = device.receive(time).unwrap();
 
@@ -311,7 +313,23 @@ where
                 (port assigned in Boot Server Ack packet). The file downloaded and the placement of the
                 downloaded code in memory is dependent on the client’s CPU architecture.
                 */
-                state = PxeStates::Tftp(TftpStates::Tsize);
+                state = PxeStates::ArpRequest;
+            }
+            PxeStates::ArpRequest => {
+                match tftp_state::arp_respond(rx_token, tx_token, &server_mac, &server_ip) {
+                    Ok(info) => {
+                        state = PxeStates::Tftp(TftpStates::Tsize);
+                    }
+                    Err(Error::IgnoreNoLog(e)) => {
+                        trace!("Ignoring packet. Reason: {}", e);
+                        continue;
+                    }
+                    Err(Error::Ignore(e)) => {
+                        debug!("Ignoring packet. Reason: {}", e);
+                        continue;
+                    }
+                    Err(e) => panic!("Error: {}", e),
+                }
             }
             PxeStates::Tftp(ref tftp_state) => {
                 let (tftp_con, wrapper) =

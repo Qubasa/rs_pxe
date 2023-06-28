@@ -16,6 +16,7 @@ use smoltcp::phy::RawSocket;
 use smoltcp::phy::RxToken;
 use smoltcp::phy::TxToken;
 use smoltcp::time::Instant;
+use smoltcp::wire::ArpRepr;
 use smoltcp::wire::DhcpMessageType;
 use smoltcp::wire::DhcpOption;
 use smoltcp::wire::DhcpOptionWriter;

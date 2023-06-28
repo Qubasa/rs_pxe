@@ -1,6 +1,6 @@
 use smoltcp::{
     time::{Duration, Instant},
-    wire::{EthernetAddress, Ipv4Address},
+    wire::{ArpRepr, EthernetAddress, Ipv4Address},
 };
 
 use smolapps::wire::tftp::Repr;
@@ -360,6 +360,64 @@ where
         ))),
     }
 }
+
+pub fn arp_respond<R, T>(
+    rx_token: R,
+    tx_token: T,
+    server_mac: &EthernetAddress,
+    server_ip: &Ipv4Address,
+) -> Result<()>
+where
+    R: smoltcp::phy::RxToken,
+    T: smoltcp::phy::TxToken,
+{
+    let arp = rx_token.consume(|buffer| {
+        let arp = utils::ether_to_arp(buffer)?;
+        Ok::<ArpRepr, Error>(arp)
+    })?;
+
+    match arp {
+        ArpRepr::EthernetIpv4 {
+            operation,
+            target_protocol_addr,
+            target_hardware_addr: _,
+            source_hardware_addr,
+            source_protocol_addr,
+        } => {
+            if target_protocol_addr != *server_ip {
+                return Err(Error::Ignore(f!(
+                    "Ignoring arp packet with target ip: {}",
+                    target_protocol_addr
+                )));
+            }
+
+            if operation != smoltcp::wire::ArpOperation::Request {
+                return Err(Error::Ignore(f!(
+                    "Ignoring arp packet with operation: {:?}",
+                    operation
+                )));
+            }
+
+            let arp = ArpRepr::EthernetIpv4 {
+                operation: smoltcp::wire::ArpOperation::Reply,
+                source_hardware_addr: *server_mac,
+                source_protocol_addr: *server_ip,
+                target_hardware_addr: source_hardware_addr,
+                target_protocol_addr: source_protocol_addr,
+            };
+
+            let packet = utils::arp_reply(arp);
+
+            tx_token.consume(packet.len(), |buffer| {
+                buffer.copy_from_slice(&packet);
+            });
+        }
+        _ => todo!(),
+    }
+
+    Ok(())
+}
+
 pub fn recv_tftp<H>(
     rx_token: H,
     server_mac: &EthernetAddress,
