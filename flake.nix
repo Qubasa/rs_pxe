@@ -91,7 +91,7 @@
           cargoLock = {
             lockFile = ./Cargo.lock;
             outputHashes = {
-              "smoltcp-0.9.1" = "sha256-rFQSg61iakjWa9btC8JupRd1sYjmUrN7KHt+IUrUFA4=";
+              "smoltcp-0.9.1" = smoltcp.narHash;
             };
           };
 
