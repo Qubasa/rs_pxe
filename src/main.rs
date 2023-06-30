@@ -313,7 +313,9 @@ where
                 (port assigned in Boot Server Ack packet). The file downloaded and the placement of the
                 downloaded code in memory is dependent on the client’s CPU architecture.
                 */
-                state = PxeStates::ArpRequest;
+                //state = PxeStates::ArpRequest;
+                log::info!("Changing to tftp tsize state");
+                state = PxeStates::Tftp(TftpStates::Tsize);
             }
             PxeStates::ArpRequest => {
                 match tftp_state::arp_respond(rx_token, tx_token, &server_mac, &server_ip) {
@@ -351,6 +353,7 @@ where
                         tftp_state::reply_tsize(tx_token, &wrapper, tftp_con, &mut transfers)
                             .unwrap();
 
+                        log::info!("Changing to blksize state");
                         state = PxeStates::Tftp(TftpStates::BlkSize);
                     }
                     TftpStates::BlkSize => {
@@ -368,6 +371,7 @@ where
                             Err(e) => panic!("Error: {}", e),
                         };
 
+                        log::info!("Changing to tftp data state");
                         state = PxeStates::Tftp(TftpStates::Data { blksize })
                     }
                     TftpStates::Data { blksize } => {
@@ -381,6 +385,7 @@ where
                         .unwrap();
 
                         if done {
+                            log::info!("Changing to tftp done state");
                             state = PxeStates::Tftp(TftpStates::Done);
                         }
                     }

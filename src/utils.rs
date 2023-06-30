@@ -82,7 +82,7 @@ pub fn uni_broad_ether_to_dhcp<'a>(
     server_ip: &'a Ipv4Address,
 ) -> Result<DhcpPacket<&'a [u8]>> {
     let ether = EthernetFrame::new_checked(buffer).unwrap();
-    if ether.dst_addr() != *server_mac && ether.dst_addr() != EthernetAddress::BROADCAST {
+    if ether.dst_addr() != *server_mac {
         return Err(Error::IgnoreNoLog(
             "Mac address does not match with ours. And isn't broardcast".to_string(),
         ));
@@ -96,7 +96,7 @@ pub fn uni_broad_ether_to_dhcp<'a>(
         }
     };
 
-    if ipv4.dst_addr() != *server_ip && ipv4.dst_addr() != Ipv4Address::BROADCAST {
+    if ipv4.dst_addr() != *server_ip {
         return Err(Error::IgnoreNoLog(
             "IP destination does not match our server ip".to_string(),
         ));
@@ -110,7 +110,7 @@ pub fn uni_broad_ether_to_dhcp<'a>(
         }
     };
 
-    if udp.dst_port() != 4011 && udp.dst_port() != 67 {
+    if udp.dst_port() != 4011 {
         return Err(Error::IgnoreNoLog(
             "Not a dhcp packet. Port does not match".to_string(),
         ));
@@ -320,6 +320,7 @@ pub fn tftp_to_ether_unicast<'a>(tftp: &'a tftp::Repr<'a>, con: &'a TftpConnecti
         src_port: con.server_port,
         dst_port: con.client_port,
     };
+
     let ip_packet = Ipv4Repr {
         src_addr: con.server_ip,
         dst_addr: con.client_ip,
@@ -327,6 +328,13 @@ pub fn tftp_to_ether_unicast<'a>(tftp: &'a tftp::Repr<'a>, con: &'a TftpConnecti
         payload_len: tftp.buffer_len() + udp_packet.header_len(),
         next_header: IpProtocol::Udp,
     };
+    log::debug!(
+        "Sending tftp packet to {}:{} from {}:{}",
+        ip_packet.dst_addr,
+        udp_packet.dst_port,
+        ip_packet.src_addr,
+        udp_packet.src_port
+    );
 
     let eth_packet = EthernetRepr {
         dst_addr: con.client_mac,

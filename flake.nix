@@ -40,6 +40,11 @@
           target64
         ];
 
+        myRustPlatform = (pkgs.makeRustPlatform {
+          cargo = myrust;
+          rustc = myrust;
+        });
+
         buildDir = pkgs.symlinkJoin {
           name = "build";
           paths = [ self ];
@@ -61,9 +66,12 @@
           cargo-watch
           rust-analyzer-nightly
           pixiecore
-          dhcpcd
+          #dhcpcd
+          entr
           dhcp
         ];
+
+
       in
       rec {
 
@@ -78,12 +86,15 @@
           };
         };
 
-        packages.default = (pkgs.makeRustPlatform {
-          cargo = myrust;
-          rustc = myrust;
-        }).buildRustPackage {
+        packages.default = myRustPlatform.buildRustPackage {
           src = buildDir;
-          cargoLock.lockFile = ./Cargo.lock;
+          cargoLock = {
+            lockFile = ./Cargo.lock;
+            outputHashes = {
+              "smoltcp-0.9.1" = "sha256-rFQSg61iakjWa9btC8JupRd1sYjmUrN7KHt+IUrUFA4=";
+            };
+          };
+
           pname = "pxe-rs";
           #nativeBuildInputs = [ pkgs.breakpointHook ];
           version = "0.1.0";

@@ -26,9 +26,19 @@ function reset_net {
 }
 function ctrl_c() {
     echo "** Trapped CTRL-C"
-    pkill rs_pxe || true
+    sudo pkill rs_pxe || true
+    sudo pkill qemu_ipxe || true
     reset_net
 }
+
+function arp_conf {
+  sudo sysctl -w net.ipv4.conf."$1".proxy_arp=1
+  sudo sysctl -w net.ipv4.conf."$1".arp_filter=0
+  sudo sysctl -w net.ipv4.conf."$1".arp_ignore=0
+  sudo sysctl -w net.ipv4.conf."$1".arp_notify=1
+  sudo sysctl -w net.ipv4.conf."$1".arp_accept=1
+}
+
 function setup_net {
   sudo ip tuntap add dev "$QEMU_IF" mode tap user "$USER"
   sudo ip tuntap add dev "$RUST_IF" mode tap user "$USER"
@@ -36,6 +46,7 @@ function setup_net {
   sudo brctl addbr $BRIDGE &> /dev/null
   sudo brctl addif $BRIDGE "$RUST_IF" &> /dev/null
   sudo brctl addif $BRIDGE "$QEMU_IF"  &> /dev/null
+  sudo ip link set $BRIDGE promisc on
   sudo ip link set $BRIDGE up
 
   sudo ip link set address $RUST_MAC dev "$RUST_IF"
@@ -45,10 +56,12 @@ function setup_net {
   sudo ip link set "$QEMU_IF" up
   sudo ip address add 192.168.33.1/24 broadcast 192.168.33.255 dev kmania_br0
 
+  arp_conf "$RUST_IF"
+  arp_conf "$QEMU_IF"
+  arp_conf "$BRIDGE"
+  #sudo bridge fdb add $RUST_MAC dev $BRIDGE dst 192.168.33.101
+  #sudo ip addr add 192.168.33.101/24 dev "$RUST_IF"
 
-  #sudo bridge fdb add $RUST_MAC dev kmania_br0 dst 192.168.33.111
-  #sudo ip addr add 192.168.33.111/24 dev "$RUST_IF"
-  #sudo sysctl -w net.ipv4.conf."$RUST_IF".proxy_arp=1
   #sudo arp -s 192.168.33.111 $RUST_MAC -i "$RUST_IF"
 
 
@@ -59,6 +72,11 @@ function setup_net {
 trap ctrl_c INT
 reset_net
 setup_net
+
+wireshark -k -i "$QEMU_IF" &
+wireshark -k -i "$RUST_IF" &
+wireshark -k -i "$BRIDGE" &
+
 
 PAYLOAD=$(cat <<EOF
 set -xe
@@ -75,4 +93,4 @@ EOF
 
 
 # correct way is to run dhcp server on tapif1 and have raw socket mode enabled?
-cargo watch -- bash -c "$PAYLOAD"
+find "." -iname "*.rs" | entr -r -n bash -c "$PAYLOAD"
