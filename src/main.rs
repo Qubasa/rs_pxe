@@ -35,6 +35,7 @@ use smoltcp::wire::HardwareAddress;
 use smoltcp::wire::IpEndpoint;
 use smoltcp::wire::IpListenEndpoint;
 
+use core::panic;
 use rand::prelude::*;
 use smoltcp::wire::IpAddress;
 use smoltcp::wire::IpCidr;
@@ -93,26 +94,42 @@ fn main() {
 
         let mut iface = Interface::new(config, &mut device);
 
-        utils::request_dhcp_ip(&mut device, &mut iface);
+        utils::get_ip(&mut device, &mut iface);
+        let mut socket = MyRawSocket::new(device, iface);
 
-        server(&mut device, &mut iface);
+        server(&mut socket);
     } else if matches.opt_present("tap") {
         let mut device = smoltcp::phy::TunTapInterface::new(&interface, Medium::Ethernet).unwrap();
 
         // Create interface
         let mut config = match device.capabilities().medium {
             Medium::Ethernet => Config::new(Into::into(*hardware_addr)),
+            Medium::Ip => panic!("Tap interface does not support IP"),
+            Medium::Ieee802154 => todo!(),
+        };
+        config.random_seed = rand::random();
+        let mut iface = Interface::new(config, &mut device);
+
+        utils::get_ip(&mut device, &mut iface);
+
+        let mut socket = MyRawSocket::new(device, iface);
+        server(&mut socket);
+    } else if matches.opt_present("tun") {
+        let mut device = smoltcp::phy::TunTapInterface::new(&interface, Medium::Ip).unwrap();
+
+        // Create interface
+        let mut config = match device.capabilities().medium {
+            Medium::Ethernet => panic!("Tun interface does not support Ethernet"),
             Medium::Ip => Config::new(smoltcp::wire::HardwareAddress::Ip),
             Medium::Ieee802154 => todo!(),
         };
         config.random_seed = rand::random();
         let mut iface = Interface::new(config, &mut device);
 
-        utils::request_dhcp_ip(&mut device, &mut iface);
+        utils::get_ip(&mut device, &mut iface);
 
-        server(&mut device, &mut iface);
-    } else if matches.opt_present("tun") {
-        todo!("Tun support not implemented yet");
+        let mut socket = MyRawSocket::new(device, iface);
+        server(&mut socket);
     } else {
         let brief = "Either --raw or --tun or --tap must be specified";
         panic!("{}", opts.usage(brief));
@@ -137,19 +154,79 @@ pub enum TftpStates {
     Done,
 }
 
-pub fn server<DeviceT: AsRawFd>(device: &mut DeviceT, iface: &mut Interface) -> !
+pub trait GenericSocket<D>
 where
-    DeviceT: for<'d> Device,
+    D: Device,
 {
-    log::info!("Starting server with ip: {}", iface.ipv4_addr().unwrap());
-    let fd = device.as_raw_fd();
+    type R<'a>: RxToken
+    where
+        Self: 'a;
+    type T<'a>: TxToken
+    where
+        Self: 'a;
 
+    fn send(&mut self, data: &[u8]) -> Result<usize>;
+    fn wait(&mut self) -> Result<(Self::R<'_>, Self::T<'_>)>;
+    fn hardware_addr(&self) -> HardwareAddress;
+    fn ip_addr(&self) -> IpAddress;
+}
+
+pub struct MyRawSocket<DeviceT: AsRawFd + Device> {
+    device: DeviceT,
+    iface: Interface,
+    time: Instant,
+}
+
+impl<DeviceT: AsRawFd + Device> MyRawSocket<DeviceT> {
+    pub fn new(device: DeviceT, iface: Interface) -> Self {
+        Self {
+            device,
+            iface,
+            time: Instant::now(),
+        }
+    }
+}
+
+impl<DeviceT: AsRawFd + Device> GenericSocket<DeviceT> for MyRawSocket<DeviceT> {
+    type R<'a> = DeviceT::RxToken<'a>
+    where
+        Self: 'a;
+    type T<'a> = DeviceT::TxToken<'a>
+    where
+        Self: 'a;
+    fn send(&mut self, data: &[u8]) -> Result<usize> {
+        todo!()
+    }
+
+    fn wait(&mut self) -> Result<(Self::R<'_>, Self::T<'_>)> {
+        let fd: i32 = self.device.as_raw_fd();
+        phy_wait(fd, None).unwrap();
+        let (rx_token, tx_token) = self.device.receive(self.time).unwrap();
+
+        todo!("Implement this");
+    }
+
+    fn hardware_addr(&self) -> HardwareAddress {
+        self.iface.hardware_addr()
+    }
+
+    fn ip_addr(&self) -> IpAddress {
+        self.iface.ipv4_addr().unwrap().into()
+    }
+}
+
+pub fn server<DeviceT: Device, G>(socket: &mut G) -> !
+where
+    G: GenericSocket<DeviceT>,
+{
     // Get interface mac and ip
-    let server_mac = match iface.hardware_addr() {
+    let server_mac = match socket.hardware_addr() {
         HardwareAddress::Ethernet(addr) => addr,
         _ => panic!("Currently we only support ethernet"),
     };
-    let server_ip = iface.ipv4_addr().unwrap();
+    let server_ip = socket.ip_addr();
+
+    log::info!("Starting server with ip: {}", server_ip);
 
     // Find free tftp port in userspace range
     let tftp_endpoint = {
@@ -157,10 +234,12 @@ where
             .expect("No free UDP port found");
 
         IpListenEndpoint {
-            addr: Some(server_ip.into_address()),
+            addr: Some(server_ip),
             port: free_port,
         }
     };
+
+    let server_ip = Ipv4Address::from_bytes(server_ip.as_bytes());
 
     // State machine
     let mut state = PxeStates::Discover;
@@ -170,8 +249,7 @@ where
     loop {
         let time = Instant::now();
 
-        phy_wait(fd, None).unwrap();
-        let (rx_token, tx_token) = device.receive(time).unwrap();
+        let (rx_token, tx_token) = socket.wait().unwrap();
 
         match state {
             PxeStates::Discover => {
@@ -398,5 +476,40 @@ where
 
             PxeStates::Done => todo!(),
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use smoltcp::phy::Loopback;
+
+    use super::*;
+
+    fn create_ethernet<'a>() -> (Interface, SocketSet<'a>, Loopback) {
+        // Create a basic device
+        let mut device = Loopback::new(Medium::Ethernet);
+
+        let config = Config::new(HardwareAddress::Ethernet(EthernetAddress::default()));
+        let mut iface = Interface::new(config, &mut device);
+        iface.update_ip_addrs(|ip_addrs| {
+            ip_addrs
+                .push(IpCidr::new(IpAddress::v4(127, 0, 0, 1), 8))
+                .unwrap();
+            ip_addrs
+                .push(IpCidr::new(IpAddress::v6(0, 0, 0, 0, 0, 0, 0, 1), 128))
+                .unwrap();
+            ip_addrs
+                .push(IpCidr::new(IpAddress::v6(0xfdbe, 0, 0, 0, 0, 0, 0, 1), 64))
+                .unwrap();
+        });
+
+        (iface, SocketSet::new(vec![]), device)
+    }
+
+    #[test]
+    pub fn test_pxe() {
+        // let (mut iface, mut sockets, mut device) = create_ethernet();
+
+        // server(&mut device, &mut iface);
     }
 }

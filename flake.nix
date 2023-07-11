@@ -66,9 +66,10 @@
           cargo-watch
           rust-analyzer-nightly
           pixiecore
-          #dhcpcd
+          dhcpcd
           entr
-          dhcp
+          #dhcp
+          ns-3
         ];
 
 

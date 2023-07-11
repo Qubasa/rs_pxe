@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 #![allow(unused_imports)]
 
+use std::net::IpAddr;
 use std::os::fd::AsRawFd;
 
 use crate::parse::PxeClientInfo;
@@ -27,6 +28,7 @@ use smoltcp::wire::HardwareAddress;
 use smoltcp::wire::IpCidr;
 use smoltcp::wire::IpEndpoint;
 use smoltcp::wire::IpProtocol;
+use smoltcp::wire::Ipv4Cidr;
 use smoltcp::wire::Ipv4Repr;
 use smoltcp::wire::UdpRepr;
 
@@ -429,6 +431,33 @@ pub fn arp_announce(address: EthernetAddress, ip_addr: Ipv4Address) -> Vec<u8> {
     buffer
 }
 
+pub fn get_ip<DeviceT: AsRawFd + smoltcp::phy::Device>(
+    device: &mut DeviceT,
+    iface: &mut Interface,
+) {
+    match local_ip_address::local_ip() {
+        Ok(ip) => {
+            let ip = match ip {
+                IpAddr::V4(ip) => {
+                    let t = Ipv4Address::from_bytes(&ip.octets());
+                    Ipv4Cidr::new(t, 24)
+                }
+                IpAddr::V6(_ip) => {
+                    panic!("IPv6 not supported");
+                }
+            };
+            log::info!("Local IP address: {}", ip);
+            iface.update_ip_addrs(|ip_addr| {
+                ip_addr.push(smoltcp::wire::IpCidr::Ipv4(ip)).unwrap();
+            });
+        }
+        Err(e) => {
+            log::error!("Failed to get local ip address: {}", e);
+            request_dhcp_ip(device, iface);
+        }
+    };
+}
+
 pub fn request_dhcp_ip<DeviceT: AsRawFd>(device: &mut DeviceT, iface: &mut Interface)
 where
     DeviceT: for<'d> Device,
@@ -440,6 +469,7 @@ where
     let dhcp_handle = sockets.add(dhcp_socket);
     let fd = device.as_raw_fd();
 
+    log::info!("Requesting DHCP IP address");
     loop {
         let timestamp = Instant::now();
         iface.poll(timestamp, device, &mut sockets);
@@ -472,13 +502,13 @@ where
             }
             Some(dhcpv4::Event::Deconfigured) => {
                 log::debug!("DHCP lost config!");
-                //set_ipv4_addr(&mut iface, Ipv4Cidr::new(Ipv4Address::UNSPECIFIED, 0));
                 iface.routes_mut().remove_default_ipv4_route();
             }
         }
 
-        smoltcp::phy::wait(fd, iface.poll_delay(timestamp, &sockets)).expect("wait error");
+        smoltcp::phy::wait(fd, iface.poll_delay(timestamp, &sockets)).expect("dhcp timeout error");
     }
+
     let time = Instant::now();
     smoltcp::phy::wait(fd, None).unwrap();
     let (_rx_token, tx_token) = device.receive(time).unwrap();

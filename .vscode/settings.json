@@ -1,4 +1,4 @@
 {
-    "rust-analyzer.server.path": "/nix/store/54rs0n1bh8qvcw8fkl4xyv2c8fllcvd8-rust-analyzer-nightly-e7337fc/bin/rust-analyzer",
+    "rust-analyzer.server.path": "/nix/store/522wi2c518djfvlbrb5qxq5clgicq064-rust-analyzer-nightly-f96442a/bin/rust-analyzer",
     "rust-analyzer.inlayHints.chainingHints.enable": false
 }
