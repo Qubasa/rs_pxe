@@ -203,7 +203,7 @@ impl<DeviceT: AsRawFd + Device> GenericSocket<DeviceT> for MyRawSocket<DeviceT> 
         phy_wait(fd, None).unwrap();
         let (rx_token, tx_token) = self.device.receive(self.time).unwrap();
 
-        todo!("Implement this");
+        Ok((rx_token, tx_token))
     }
 
     fn hardware_addr(&self) -> HardwareAddress {
