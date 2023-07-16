@@ -53,13 +53,13 @@ function setup_net {
 }
 
 trap ctrl_c INT
-reset_net
-setup_net
+#reset_net
+#setup_net
 
 
 #wireshark -k -i "$QEMU_IF" &> /dev/null &
-wireshark -k -i "$RUST_IF" &> /dev/null &
-wireshark -k -i "$BRIDGE" &> /dev/null &
+#wireshark -k -i "$RUST_IF" &> /dev/null &
+#wireshark -k -i "$BRIDGE" &> /dev/null &
 
 
 
@@ -70,7 +70,7 @@ pkill rs_pxe || true
 rm -f ./target/debug/rs_pxe
 cargo build
 sudo setcap cap_net_admin,cap_net_raw=eip ./target/debug/rs_pxe
-./target/debug/rs_pxe -l DEBUG --tap -i $RUST_IF &
+./target/debug/rs_pxe -l DEBUG --raw -i $LAN &
 #qemu-system-x86_64 -enable-kvm -m 1024 -name qemu_ipxe,process=qemu_ipxe -net nic -net tap,ifname="$QEMU_IF",script=no,downscript=no -fda ipxe.dsk -snapshot -serial stdio -display none 
 EOF
 )

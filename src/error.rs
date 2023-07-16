@@ -30,4 +30,7 @@ pub enum Error {
 
     #[error("Tftp errror: {0}")]
     Tftp(String),
+
+    #[error("Tftp end of file")]
+    TftpEndOfFile,
 }
