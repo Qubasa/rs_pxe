@@ -61,7 +61,7 @@ trap ctrl_c INT
 #wireshark -k -i "$RUST_IF" &> /dev/null &
 #wireshark -k -i "$BRIDGE" &> /dev/null &
 
-
+wireshark -k -i "$LAN" &> /dev/null &
 
 PAYLOAD=$(cat <<EOF
 set -xe

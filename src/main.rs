@@ -172,7 +172,7 @@ mod test {
 
     use super::*;
 
-    fn create_ethernet<'a>() -> (Interface, Loopback) {
+    fn create_ethernet() -> (Interface, Loopback) {
         // Create a basic device
         let mut device = Loopback::new(Medium::Ethernet);
 

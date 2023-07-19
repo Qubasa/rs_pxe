@@ -40,7 +40,7 @@ impl Handle for TestTftp {
         Ok(self.file.read(buf)?)
     }
 
-    fn write(&mut self, buf: &[u8]) -> Result<usize> {
+    fn write(&mut self, _buf: &[u8]) -> Result<usize> {
         todo!()
     }
 }

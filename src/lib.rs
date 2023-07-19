@@ -86,6 +86,7 @@ enum PxeStates {
     Request(u32),
     ArpRequest,
     Tftp(TftpStates),
+    Done,
 }
 
 #[derive(Debug)]
@@ -94,7 +95,6 @@ pub enum TftpStates {
     BlkSize,
     Data { blksize: usize },
     Error,
-    Done,
 }
 
 #[derive(Debug)]
@@ -202,7 +202,7 @@ impl PxeSocket {
                 */
                 self.state = PxeStates::Request(info.transaction_id);
 
-                return Ok(packet);
+                Ok(packet)
             }
             PxeStates::Request(transaction_id) => {
                 /*  ================== Parse PXE Request ================== */
@@ -266,18 +266,16 @@ impl PxeSocket {
                 (port assigned in Boot Server Ack packet). The file downloaded and the placement of the
                 downloaded code in memory is dependent on the client’s CPU architecture.
                 */
-                //state = PxeStates::ArpRequest;
                 log::info!("Changing to tftp tsize state");
                 self.state = PxeStates::Tftp(TftpStates::Tsize);
 
-                return Ok(packet);
+                Ok(packet)
             }
             PxeStates::ArpRequest => {
                 let packet = self.arp_respond(rx_buffer)?;
-
                 self.state = PxeStates::Tftp(TftpStates::Tsize);
 
-                return Ok(packet);
+                Ok(packet)
             }
             PxeStates::Tftp(ref tftp_state) => {
                 let (tftp_con, wrapper) = self.recv_tftp(rx_buffer)?;
@@ -289,7 +287,7 @@ impl PxeSocket {
                         log::info!("Changing to blksize state");
                         self.state = PxeStates::Tftp(TftpStates::BlkSize);
 
-                        return Ok(packet);
+                        Ok(packet)
                     }
                     TftpStates::BlkSize => {
                         let (packet, blksize) = self.reply_blksize(&wrapper, tftp_con)?;
@@ -297,28 +295,27 @@ impl PxeSocket {
                         log::info!("Changing to tftp data state");
                         self.state = PxeStates::Tftp(TftpStates::Data { blksize });
 
-                        return Ok(packet);
+                        Ok(packet)
                     }
                     TftpStates::Data { blksize } => {
                         match self.reply_data(&wrapper, tftp_con, *blksize) {
-                            Ok(packet) => {
-                                return Ok(packet);
-                            }
+                            Ok(packet) => Ok(packet),
                             Err(Error::TftpEndOfFile) => {
                                 log::info!("Changing to tftp done state");
-                                self.state = PxeStates::Tftp(TftpStates::Done);
-                                return Err(Error::IgnoreNoLog("End of file reached".to_string()));
+                                self.state = PxeStates::Done;
+                                Err(Error::IgnoreNoLog("End of file reached".to_string()))
                             }
-                            Err(e) => return Err(e),
-                        };
+                            Err(e) => Err(e),
+                        }
                     }
                     TftpStates::Error => todo!(),
-                    TftpStates::Done => {
-                        log::info!("TFTP Done");
-                        self.state = PxeStates::Discover;
-                        return Err(Error::IgnoreNoLog("TFTP Done".to_string()));
-                    }
                 }
+            }
+            PxeStates::Done => {
+                log::info!("PXE Done");
+                self.state = PxeStates::Discover;
+                self.transfers.clear();
+                Err(Error::IgnoreNoLog("PXE Done".to_string()))
             }
         }
     }
@@ -359,7 +356,7 @@ impl PxeSocket {
 
                 let packet = crate::utils::tftp_to_ether_unicast(&data, &tftp_con);
 
-                return Ok(packet);
+                Ok(packet)
             }
             (Repr::Error { code, msg }, None | Some(_)) => {
                 Err(Error::Tftp(f!("tftp error: {} code: {:?}", msg, code)))
@@ -381,7 +378,7 @@ impl PxeSocket {
             match (*wrapper.borrow_repr(), xfer_idx) {
                 (
                     Repr::ReadRequest {
-                        filename,
+                        filename: _,
                         mode,
                         opts,
                     },
@@ -391,7 +388,7 @@ impl PxeSocket {
                         return Err(Error::Tftp("Only octet mode is supported".to_string()));
                     }
 
-                    let t = {
+                    let _t = {
                         let xfer_idx = TestTftp {
                             file: File::open("ipxe.pxe").unwrap(),
                         };
@@ -535,21 +532,19 @@ impl PxeSocket {
                         let ack = Repr::OptionAck { opts };
                         let packet = crate::utils::tftp_to_ether_unicast(&ack, &tftp_con);
 
-                        return Ok(packet);
+                        Ok(packet)
                     } else {
-                        return Err(Error::Tftp("tftp: tsize option not found".to_string()));
+                        Err(Error::Tftp("tftp: tsize option not found".to_string()))
                     }
                 }
                 (Repr::Error { code, msg }, None | Some(_)) => {
-                    return Err(Error::Tftp(f!("tftp error: {} code: {:?}", msg, code)));
+                    Err(Error::Tftp(f!("tftp error: {} code: {:?}", msg, code)))
                 }
-                (packet, ..) => {
-                    return Err(Error::Tftp(f!(
-                        "Received unexpected tftp packet: {:?}. ",
-                        packet
-                    )));
-                }
-            };
+                (packet, ..) => Err(Error::Tftp(f!(
+                    "Received unexpected tftp packet: {:?}. ",
+                    packet
+                ))),
+            }
         }
     }
 
@@ -593,7 +588,7 @@ impl PxeSocket {
         Ok((client, wrapper))
     }
 
-    pub fn arp_respond(&mut self, rx_buffer: &[u8]) -> Result<Vec<u8>> {
+    pub fn arp_respond(&self, rx_buffer: &[u8]) -> Result<Vec<u8>> {
         let arp = utils::ether_to_arp(rx_buffer)?;
 
         match arp {
