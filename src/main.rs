@@ -95,19 +95,33 @@ fn main() {
         let mut iface = Interface::new(config, &mut device);
 
         utils::get_ip(&mut device, &mut iface);
-        let mut socket = MyRawSocket::new(device, iface);
 
-        let mut pxe_socket = PxeSocket::new(&socket);
+        let mut pxe_socket = PxeSocket::new(iface);
 
         loop {
-            let (rx, tx) = socket.wait(Instant::now()).unwrap();
+            let fd: i32 = device.as_raw_fd();
+            phy_wait(fd, None).unwrap();
+            let (rx, tx) = device.receive(Instant::now()).unwrap();
+
             let packet = rx.consume(|buffer| pxe_socket.process(buffer));
-            if let Some(packet) = packet {
-                tx.consume(packet.len(), |buffer| {
-                    buffer.copy_from_slice(&packet);
-                    Ok::<(), Error>(())
-                })
-                .unwrap();
+
+            match packet {
+                Ok(packet) => {
+                    tx.consume(packet.len(), |buffer| {
+                        buffer.copy_from_slice(&packet);
+                        Ok::<(), Error>(())
+                    })
+                    .unwrap();
+                }
+                Err(Error::Ignore(e)) => {
+                    debug!("Ignore: {:?}", e);
+                }
+                Err(Error::IgnoreNoLog(e)) => {
+                    trace!("IgnoreNoLog: {:?}", e);
+                }
+                Err(e) => {
+                    panic!("{:?}", e);
+                }
             }
         }
     } else if matches.opt_present("tap") {
@@ -179,51 +193,10 @@ mod test {
         (iface, device)
     }
 
-    pub struct TestSocket<DeviceT: Device> {
-        device: DeviceT,
-        iface: Interface,
-        timestamp: Instant,
-    }
-
-    impl<DeviceT: Device> TestSocket<DeviceT> {
-        pub fn new(device: DeviceT, iface: Interface) -> Self {
-            Self {
-                device,
-                iface,
-                timestamp: Instant::now(),
-            }
-        }
-    }
-
-    impl<DeviceT: Device> GenericSocket<DeviceT> for TestSocket<DeviceT> {
-        type R<'a> = DeviceT::RxToken<'a>
-        where
-            Self: 'a;
-        type T<'a> = DeviceT::TxToken<'a>
-        where
-            Self: 'a;
-
-        fn send(&mut self, data: &[u8]) -> Result<usize> {
-            todo!()
-        }
-
-        fn wait(&mut self, time: Instant) -> Result<(Self::R<'_>, Self::T<'_>)> {
-            let res = self.device.receive(self.timestamp).unwrap();
-            Ok(res)
-        }
-
-        fn hardware_addr(&self) -> HardwareAddress {
-            self.iface.hardware_addr()
-        }
-
-        fn ip_addr(&self) -> IpAddress {
-            self.iface.ipv4_addr().unwrap().into()
-        }
-    }
     #[test]
     pub fn test_pxe() {
-        let (mut iface, mut device) = create_ethernet();
-        let mut testsocket = TestSocket::new(device, iface);
+        // let (mut iface, mut device) = create_ethernet();
+        // let mut testsocket = TestSocket::new(device, iface);
 
         //server(&mut testsocket);
     }

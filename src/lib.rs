@@ -86,7 +86,6 @@ enum PxeStates {
     Request(u32),
     ArpRequest,
     Tftp(TftpStates),
-    Done,
 }
 
 #[derive(Debug)]
@@ -96,62 +95,6 @@ pub enum TftpStates {
     Data { blksize: usize },
     Error,
     Done,
-}
-
-pub trait GenericSocket<D>
-where
-    D: Device,
-{
-    type R<'a>: RxToken
-    where
-        Self: 'a;
-    type T<'a>: TxToken
-    where
-        Self: 'a;
-
-    fn send(&mut self, data: &[u8]) -> Result<usize>;
-    fn wait(&mut self, time: Instant) -> Result<(Self::R<'_>, Self::T<'_>)>;
-    fn hardware_addr(&self) -> HardwareAddress;
-    fn ip_addr(&self) -> IpAddress;
-}
-
-pub struct MyRawSocket<DeviceT: AsRawFd + Device> {
-    device: DeviceT,
-    iface: Interface,
-}
-
-impl<DeviceT: AsRawFd + Device> MyRawSocket<DeviceT> {
-    pub fn new(device: DeviceT, iface: Interface) -> Self {
-        Self { device, iface }
-    }
-}
-
-impl<DeviceT: AsRawFd + Device> GenericSocket<DeviceT> for MyRawSocket<DeviceT> {
-    type R<'a> = DeviceT::RxToken<'a>
-    where
-        Self: 'a;
-    type T<'a> = DeviceT::TxToken<'a>
-    where
-        Self: 'a;
-    fn send(&mut self, data: &[u8]) -> Result<usize> {
-        todo!()
-    }
-
-    fn wait(&mut self, time: Instant) -> Result<(Self::R<'_>, Self::T<'_>)> {
-        let fd: i32 = self.device.as_raw_fd();
-        phy_wait(fd, None).unwrap();
-        let (rx_token, tx_token) = self.device.receive(time).unwrap();
-
-        Ok((rx_token, tx_token))
-    }
-
-    fn hardware_addr(&self) -> HardwareAddress {
-        self.iface.hardware_addr()
-    }
-
-    fn ip_addr(&self) -> IpAddress {
-        self.iface.ipv4_addr().unwrap().into()
-    }
 }
 
 #[derive(Debug)]
@@ -164,16 +107,13 @@ pub struct PxeSocket {
 }
 
 impl PxeSocket {
-    pub fn new<DeviceT: Device, G>(socket: &G) -> Self
-    where
-        G: GenericSocket<DeviceT>,
-    {
+    pub fn new(iface: Interface) -> Self {
         // Get interface mac and ip
-        let server_mac = match socket.hardware_addr() {
+        let server_mac = match iface.hardware_addr() {
             HardwareAddress::Ethernet(addr) => addr,
             _ => panic!("Currently we only support ethernet"),
         };
-        let server_ip = socket.ip_addr();
+        let server_ip: IpAddress = iface.ipv4_addr().unwrap().into();
 
         log::info!("Starting server with ip: {}", server_ip);
 
@@ -204,7 +144,7 @@ impl PxeSocket {
         }
     }
 
-    pub fn process(&mut self, rx_buffer: &[u8]) -> Option<Vec<u8>> {
+    pub fn process(&mut self, rx_buffer: &[u8]) -> Result<Vec<u8>> {
         match self.state {
             PxeStates::Discover => {
                 /* ================== Parse PXE Discover ================== */
@@ -216,7 +156,7 @@ impl PxeSocket {
                    - A tag for the client system architecture.
                    - A DHCP option 60, Class ID, set to “PXEClient:Arch:xxxxx:UNDI:yyyzzz”.
                 */
-                let info = match (|rx_buffer| {
+                let info = {
                     let dhcp = crate::utils::broadcast_ether_to_dhcp(rx_buffer)?;
                     let info = crate::parse::pxe_discover(dhcp)?;
 
@@ -225,19 +165,7 @@ impl PxeSocket {
                     } else {
                         Ok(info)
                     }
-                })(rx_buffer)
-                {
-                    Ok(info) => info,
-                    Err(Error::IgnoreNoLog(e)) => {
-                        trace!("Ignoring packet. Reason: {}", e);
-                        return None;
-                    }
-                    Err(Error::Ignore(e)) => {
-                        debug!("Ignoring packet. Reason: {}", e);
-                        return None;
-                    }
-                    Err(e) => panic!("Error: {}", e),
-                };
+                }?;
 
                 log::info!("Parsed PXE Discover");
                 log::info!("Sending PXE Offer");
@@ -274,7 +202,7 @@ impl PxeSocket {
                 */
                 self.state = PxeStates::Request(info.transaction_id);
 
-                return Some(packet);
+                return Ok(packet);
             }
             PxeStates::Request(transaction_id) => {
                 /*  ================== Parse PXE Request ================== */
@@ -291,7 +219,7 @@ impl PxeSocket {
                   - A DHCP option 60, Class ID, set to “PXEClient:Arch:xxxxx:UNDI:yyyzzz”.
                   - The Boot Server type in a PXE option field
                 */
-                let (info, ip, mac) = match (|rx_buffer| {
+                let (info, ip, mac) = {
                     let dhcp = crate::utils::uni_broad_ether_to_dhcp(
                         rx_buffer,
                         &self.server_mac,
@@ -308,20 +236,8 @@ impl PxeSocket {
                         return Err(Error::Ignore("Not the same transaction id".to_string()));
                     }
 
-                    Ok((info, dhcp.client_ip(), dhcp.client_hardware_address()))
-                })(rx_buffer)
-                {
-                    Ok(info) => info,
-                    Err(Error::IgnoreNoLog(e)) => {
-                        trace!("Ignoring packet. Reason: {}", e);
-                        return None;
-                    }
-                    Err(Error::Ignore(e)) => {
-                        debug!("Ignoring packet. Reason: {}", e);
-                        return None;
-                    }
-                    Err(e) => panic!("Error: {}", e),
-                };
+                    Ok::<_, Error>((info, dhcp.client_ip(), dhcp.client_hardware_address()))
+                }?;
 
                 log::info!("Parsed PXE Request");
                 log::info!("Sending PXE ACK to {} with ip {}", mac, ip);
@@ -354,36 +270,17 @@ impl PxeSocket {
                 log::info!("Changing to tftp tsize state");
                 self.state = PxeStates::Tftp(TftpStates::Tsize);
 
-                return Some(packet);
+                return Ok(packet);
             }
-            PxeStates::ArpRequest => match self.arp_respond(rx_buffer) {
-                Ok(info) => {
-                    self.state = PxeStates::Tftp(TftpStates::Tsize);
-                    return Some(info);
-                }
-                Err(Error::IgnoreNoLog(e)) => {
-                    trace!("Ignoring packet. Reason: {}", e);
-                    return None;
-                }
-                Err(Error::Ignore(e)) => {
-                    debug!("Ignoring packet. Reason: {}", e);
-                    return None;
-                }
-                Err(e) => panic!("Error: {}", e),
-            },
+            PxeStates::ArpRequest => {
+                let packet = self.arp_respond(rx_buffer)?;
+
+                self.state = PxeStates::Tftp(TftpStates::Tsize);
+
+                return Ok(packet);
+            }
             PxeStates::Tftp(ref tftp_state) => {
-                let (tftp_con, wrapper) = match self.recv_tftp(rx_buffer) {
-                    Ok(info) => info,
-                    Err(Error::IgnoreNoLog(e)) => {
-                        trace!("Ignoring packet. Reason: {}", e);
-                        return None;
-                    }
-                    Err(Error::Ignore(e)) => {
-                        debug!("Ignoring packet. Reason: {}", e);
-                        return None;
-                    }
-                    Err(e) => panic!("Error: {}", e),
-                };
+                let (tftp_con, wrapper) = self.recv_tftp(rx_buffer)?;
 
                 match tftp_state {
                     TftpStates::Tsize => {
@@ -392,51 +289,37 @@ impl PxeSocket {
                         log::info!("Changing to blksize state");
                         self.state = PxeStates::Tftp(TftpStates::BlkSize);
 
-                        return Some(packet);
+                        return Ok(packet);
                     }
                     TftpStates::BlkSize => {
-                        let (packet, blksize) = match self.reply_blksize(&wrapper, tftp_con) {
-                            Ok(blksize) => blksize,
-                            Err(Error::Ignore(e)) => {
-                                debug!("Ignoring packet. Reason: {}", e);
-                                return None;
-                            }
-                            Err(e) => panic!("Error: {}", e),
-                        };
+                        let (packet, blksize) = self.reply_blksize(&wrapper, tftp_con)?;
 
                         log::info!("Changing to tftp data state");
                         self.state = PxeStates::Tftp(TftpStates::Data { blksize });
 
-                        return Some(packet);
+                        return Ok(packet);
                     }
                     TftpStates::Data { blksize } => {
                         match self.reply_data(&wrapper, tftp_con, *blksize) {
                             Ok(packet) => {
-                                return Some(packet);
-                            }
-                            Err(Error::Ignore(e)) => {
-                                debug!("Ignoring packet. Reason: {}", e);
-                                return None;
+                                return Ok(packet);
                             }
                             Err(Error::TftpEndOfFile) => {
                                 log::info!("Changing to tftp done state");
                                 self.state = PxeStates::Tftp(TftpStates::Done);
-                                return None;
+                                return Err(Error::IgnoreNoLog("End of file reached".to_string()));
                             }
-                            Err(e) => panic!("Error: {}", e),
+                            Err(e) => return Err(e),
                         };
                     }
                     TftpStates::Error => todo!(),
                     TftpStates::Done => {
                         log::info!("TFTP Done");
-                        return None;
+                        self.state = PxeStates::Discover;
+                        return Err(Error::IgnoreNoLog("TFTP Done".to_string()));
                     }
                 }
-
-                //state = States::Discover;
             }
-
-            PxeStates::Done => todo!(),
         }
     }
 
