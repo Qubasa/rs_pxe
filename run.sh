@@ -57,12 +57,12 @@ reset_net
 setup_net
 
 
-wireshark -k -i "$QEMU_IF" &> /dev/null &
+#wireshark -k -i "$QEMU_IF" &> /dev/null &
 #wireshark -k -i "$RUST_IF" &> /dev/null &
 #wireshark -k -i "$BRIDGE" &> /dev/null &
 
 #wireshark -k -i "$LAN" &> /dev/null &
-OVMF="/nix/store/i4fj3dcfl3nc8xfjsx3xhpjvq4p3s62m-qemu-8.0.2/share/qemu/edk2-x86_64-code.fd"
+OVMF="$QEMU_SHARE/edk2-x86_64-code.fd"
 PAYLOAD=$(cat <<EOF
 set -xe
 export RUST_BACKTRACE=1
@@ -71,8 +71,11 @@ rm -f ./target/debug/rs_pxe
 cargo build
 sudo setcap cap_net_admin,cap_net_raw=eip ./target/debug/rs_pxe
 ./target/debug/rs_pxe -l DEBUG --ipxe ./assets/ipxe.pxe --raw -i $LAN &
+
+# IPXE Boot Emulation
 #qemu-system-x86_64 -enable-kvm -m 1024 -name qemu_ipxe,process=qemu_ipxe -net nic -net tap,ifname="$QEMU_IF",script=no,downscript=no -fda ./assets/ipxe.dsk -snapshot -serial stdio -display none
 
+# UEFI EDK2 Boot Emulation
 qemu-system-x86_64 -enable-kvm -m 256M -nodefaults \
     -net nic -net tap,ifname="$QEMU_IF",script=no,downscript=no \
    	-drive if=pflash,format=raw,readonly=on,file=$OVMF \
