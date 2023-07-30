@@ -491,7 +491,7 @@ impl PxeSocket {
 
                     let t = {
                         let xfer_idx = TestTftp {
-                            file: File::open("ipxe.pxe").unwrap(),
+                            file: File::open(self.get_stage_one()).unwrap(),
                         };
 
                         let transfer =
@@ -581,7 +581,7 @@ impl PxeSocket {
 
         let client = TftpConnection {
             server_ip: self.server_ip,
-            server_mac: src_mac_addr,
+            server_mac: self.server_mac,
             client_ip: Ipv4Address::from_bytes(src_endpoint.addr.as_bytes()),
             client_mac: src_mac_addr,
             server_port: udp.dst_port(),
