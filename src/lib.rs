@@ -83,7 +83,7 @@ pub struct TftpPacketWrapper {
 }
 
 #[derive(Debug)]
-enum PxeStates {
+pub enum PxeStates {
     Discover,
     Request(u32),
     ArpRequest,
@@ -101,15 +101,28 @@ pub enum TftpStates {
 
 #[derive(Debug)]
 pub struct PxeSocket {
-    pub(crate) state: PxeStates,
-    pub(crate) stage_one: PathBuf,
-    pub(crate) transfers: HashMap<TftpConnection, Transfer<TestTftp>>,
-    pub(crate) server_mac: EthernetAddress,
-    pub(crate) server_ip: Ipv4Address,
-    pub(crate) tftp_endpoint: IpListenEndpoint,
+    state: PxeStates,
+    stage_one: PathBuf,
+    transfers: HashMap<TftpConnection, Transfer<TestTftp>>,
+    server_mac: EthernetAddress,
+    server_ip: Ipv4Address,
+    tftp_endpoint: IpListenEndpoint,
 }
 
 impl PxeSocket {
+    pub fn get_server_ip(&self) -> Ipv4Address {
+        self.server_ip
+    }
+    pub fn get_server_mac(&self) -> EthernetAddress {
+        self.server_mac
+    }
+    pub fn get_state(&self) -> &PxeStates {
+        &self.state
+    }
+    pub fn get_stage_one(&self) -> &PathBuf {
+        &self.stage_one
+    }
+
     pub fn new(server_ip: Ipv4Address, server_mac: EthernetAddress, stage_one: &Path) -> Self {
         log::info!("Starting server with ip: {}", server_ip);
 

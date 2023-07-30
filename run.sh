@@ -10,7 +10,7 @@ QEMU_IF=qemu_tap
 RUST_IF=rust_tap
 
 function reset_net {
-  sudo dhcpcd -k $BRIDGE || true
+  sudo dhcpcd -f ./assets/dhcpcd.conf -k $BRIDGE || true
   sudo ip link set "$QEMU_IF" down || true
   sudo ip link set "$RUST_IF" down || true
   sudo ip link set $BRIDGE down || true
@@ -49,7 +49,7 @@ function setup_net {
   sudo ip link set $LAN up
   sudo ip link set "$RUST_IF" up
   sudo ip link set "$QEMU_IF" up
-  sudo dhcpcd -n $BRIDGE
+  sudo dhcpcd -f ./assets/dhcpcd.conf -n $BRIDGE
 }
 
 trap ctrl_c INT
@@ -70,7 +70,7 @@ pkill rs_pxe || true
 rm -f ./target/debug/rs_pxe
 cargo build
 sudo setcap cap_net_admin,cap_net_raw=eip ./target/debug/rs_pxe
-./target/debug/rs_pxe -l DEBUG --ipxe ./ipxe.pxe --raw -i $LAN &
+./target/debug/rs_pxe -l DEBUG --ipxe ./assets/ipxe.pxe --raw -i $LAN &
 #qemu-system-x86_64 -enable-kvm -m 1024 -name qemu_ipxe,process=qemu_ipxe -net nic -net tap,ifname="$QEMU_IF",script=no,downscript=no -fda ipxe.dsk -snapshot -serial stdio -display none 
 EOF
 )
