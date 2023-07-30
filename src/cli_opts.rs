@@ -52,6 +52,7 @@ pub fn create_options() -> (Options, Vec<&'static str>) {
     let mut opts = Options::new();
     opts.optflag("h", "help", "print this help menu");
     opts.optopt("i", "interface", "Interface to use", "enp2s0");
+    opts.optopt("", "ipxe", "Path to custom ipxe image", "./build/ipxe.pxe");
     opts.optflag("", "raw", "Interface to use");
     opts.optflag("", "tun", "TUN interface to use");
     opts.optflag("", "tap", "TAP interface to use");

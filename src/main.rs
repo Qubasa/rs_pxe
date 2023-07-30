@@ -71,18 +71,35 @@ fn main() {
         None => "INFO".to_owned(),
     };
 
+    let pxe_image = match matches.opt_str("ipxe") {
+        Some(image) => std::path::PathBuf::from_str(&image).expect("Invalid path to ipxe image"),
+        None => {
+            let path = std::env::var("IPXE_IMAGE")
+                .expect("IPXE_IMAGE env var not set. Or use --ipxe flag.");
+
+            std::path::PathBuf::from_str(&path).expect("Invalid path to ipxe image")
+        }
+    };
+
     let level_filter = LevelFilter::from_str(&v).unwrap();
     cli_opts::setup_logging(level_filter);
     info!("Starting pxe....");
 
-    let interface = matches.opt_str("interface").unwrap();
+    let interface = matches
+        .opt_str("interface")
+        .expect("Interface not specified");
     let mac = mac_address::mac_address_by_name(&interface)
         .unwrap()
         .unwrap();
     let hardware_addr: &EthernetAddress = &EthernetAddress::from_bytes(&mac.bytes());
 
     if matches.opt_present("raw") {
-        let mut device = RawSocket::new(&interface, Medium::Ethernet).unwrap();
+        let mut device = match RawSocket::new(&interface, Medium::Ethernet) {
+            Ok(device) => device,
+            Err(e) => {
+                panic!("Failed to create raw socket: {}", e);
+            }
+        };
 
         // Create interface
         let mut config = match device.capabilities().medium {
@@ -96,7 +113,14 @@ fn main() {
 
         utils::get_ip(&mut device, &mut iface);
 
-        let mut pxe_socket = PxeSocket::new(iface);
+        // Get interface mac and ip
+        let server_mac = match iface.hardware_addr() {
+            HardwareAddress::Ethernet(addr) => addr,
+            _ => panic!("Currently we only support ethernet"),
+        };
+        let server_ip: Ipv4Address = iface.ipv4_addr().unwrap();
+
+        let mut pxe_socket = PxeSocket::new(server_ip, server_mac, &pxe_image);
 
         loop {
             let fd: i32 = device.as_raw_fd();
@@ -162,7 +186,7 @@ fn main() {
         todo!("Tun not supported yet");
     } else {
         let brief = "Either --raw or --tun or --tap must be specified";
-        panic!("{}", opts.usage(brief));
+        panic!("{}", brief);
     };
 }
 

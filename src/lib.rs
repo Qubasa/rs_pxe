@@ -60,6 +60,8 @@ use std::convert::TryFrom;
 use std::fs::File;
 use std::io::Read;
 use std::os::unix::io::AsRawFd;
+use std::path::Path;
+use std::path::PathBuf;
 use std::str::FromStr;
 use uuid::Uuid;
 
@@ -99,22 +101,16 @@ pub enum TftpStates {
 
 #[derive(Debug)]
 pub struct PxeSocket {
-    state: PxeStates,
-    transfers: HashMap<TftpConnection, Transfer<TestTftp>>,
-    server_mac: EthernetAddress,
-    server_ip: Ipv4Address,
-    tftp_endpoint: IpListenEndpoint,
+    pub(crate) state: PxeStates,
+    pub(crate) stage_one: PathBuf,
+    pub(crate) transfers: HashMap<TftpConnection, Transfer<TestTftp>>,
+    pub(crate) server_mac: EthernetAddress,
+    pub(crate) server_ip: Ipv4Address,
+    pub(crate) tftp_endpoint: IpListenEndpoint,
 }
 
 impl PxeSocket {
-    pub fn new(iface: Interface) -> Self {
-        // Get interface mac and ip
-        let server_mac = match iface.hardware_addr() {
-            HardwareAddress::Ethernet(addr) => addr,
-            _ => panic!("Currently we only support ethernet"),
-        };
-        let server_ip: IpAddress = iface.ipv4_addr().unwrap().into();
-
+    pub fn new(server_ip: Ipv4Address, server_mac: EthernetAddress, stage_one: &Path) -> Self {
         log::info!("Starting server with ip: {}", server_ip);
 
         // Find free tftp port in userspace range
@@ -123,7 +119,7 @@ impl PxeSocket {
                 .expect("No free UDP port found");
 
             IpListenEndpoint {
-                addr: Some(server_ip),
+                addr: Some(smoltcp::wire::IpAddress::Ipv4(server_ip)),
                 port: free_port,
             }
         };
@@ -141,6 +137,7 @@ impl PxeSocket {
             server_mac,
             server_ip,
             tftp_endpoint,
+            stage_one: stage_one.to_path_buf(),
         }
     }
 
@@ -390,7 +387,8 @@ impl PxeSocket {
 
                     let _t = {
                         let xfer_idx = TestTftp {
-                            file: File::open("ipxe.pxe").unwrap(),
+                            file: File::open(&self.stage_one)
+                                .expect("Failed to open stage one bootloader"),
                         };
 
                         let transfer =
