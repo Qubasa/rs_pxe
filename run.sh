@@ -11,6 +11,7 @@ RUST_IF=rust_tap
 # Initialize local variables
 uefi_pxe=false
 ipxe=false
+none=false
 
 # Loop over the arguments
 while [[ $# -gt 0 ]]; do
@@ -22,6 +23,9 @@ while [[ $# -gt 0 ]]; do
     --ipxe) # Set ipxe to true if --ipxe is present
       ipxe=true
       ;;
+      --none) # Set ipxe to true if --ipxe is present
+      none=true
+      ;;
     *) # Ignore other arguments
       ;;
   esac
@@ -30,14 +34,13 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Check if both arguments are false
-if [[ $uefi_pxe == false && $ipxe == false ]]; then
+if [[ $uefi_pxe == false && $ipxe == false && $none == false ]]; then
   # Print a help text and exit with an error code
-  echo "Usage: $0 [--uefi_pxe] [--ipxe]"
+  echo "Usage: $0 [--uefi_pxe] [--ipxe] [--none]"
   echo "At least one of the arguments must be specified."
   exit 1
 fi
 
-set -x
 
 function reset_net {
   sudo dhcpcd -f ./assets/dhcpcd.conf -k $BRIDGE || true
@@ -84,14 +87,16 @@ function setup_net {
 
 trap ctrl_c INT
 reset_net
-setup_net
 
 
-#wireshark -k -i "$QEMU_IF" &> /dev/null &
-#wireshark -k -i "$RUST_IF" &> /dev/null &
-#wireshark -k -i "$BRIDGE" &> /dev/null &
+FILTER="dhcp or tftp"
+if $none; then
+  wireshark -Y "$FILTER" -k -i "$LAN" &> /dev/null &
+else
+  setup_net
+  wireshark -Y "$FILTER" -k -i "$QEMU_IF" &> /dev/null &
+fi
 
-#wireshark -k -i "$LAN" &> /dev/null &
 OVMF="$QEMU_SHARE/edk2-x86_64-code.fd"
 PAYLOAD=$(cat <<EOF
 set -xe
@@ -124,4 +129,3 @@ EOF
 )
 
 find "." -iname "*.rs" | entr -r -n bash -c "$PAYLOAD"
-# cargo watch -- bash -c "$PAYLOAD"

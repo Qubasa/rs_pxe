@@ -9,14 +9,7 @@ use pcap_file::pcapng::{
 use rs_pxe::{prelude::Error, *};
 use smoltcp::wire::{EthernetAddress, EthernetFrame, Ipv4Address};
 use std::io::Write;
-use std::{
-    borrow::Cow,
-    fs::File,
-    path::{Iter, Path},
-    str::FromStr,
-    time::Duration,
-    vec,
-};
+use std::{borrow::Cow, fs::File, path::Path, str::FromStr, time::Duration, vec};
 
 pub fn setup_logging(level: LevelFilter) {
     env_logger::Builder::new()
@@ -51,11 +44,15 @@ pub fn setup_logging(level: LevelFilter) {
 }
 
 struct Responses {
-    pub orig_send: Vec<Vec<u8>>,
-    pub impl_send: Vec<Vec<u8>>,
+    pub wanted: Vec<Vec<u8>>,
+    pub got: Vec<Vec<u8>>,
 }
 
-fn cmp_impl_responses(pxe_socket: &mut PxeSocket, pcap_path: &Path) -> Responses {
+fn cmp_impl_responses(
+    pxe_socket: &mut PxeSocket,
+    pcap_path: &Path,
+    handle_error: impl Fn(Error),
+) -> Responses {
     let file_in = File::open(pcap_path).expect("Error opening file");
     let mut pcapng_reader = PcapNgReader::new(file_in).unwrap();
 
@@ -89,14 +86,23 @@ fn cmp_impl_responses(pxe_socket: &mut PxeSocket, pcap_path: &Path) -> Responses
             Ok(resp) => impl_send.push(resp.to_vec()),
             Err(Error::IgnoreNoLog(e)) => trace!("IgnoreNoLog: {}", e),
             Err(Error::Ignore(e)) => debug!("Ignore: {}", e),
-            Err(e) => panic!("Error: {:?}", e),
+            Err(e) => handle_error(e),
         }
     }
 
-    assert_eq!(orig_send.len(), impl_send.len());
     Responses {
-        orig_send,
-        impl_send,
+        wanted: orig_send,
+        got: impl_send,
+    }
+}
+
+fn verify_responses(res: &Responses) {
+    assert_eq!(res.wanted.len(), res.got.len());
+
+    if res.wanted != res.got {
+        vec_to_pcap(res.got.as_slice(), Path::new("./target/got.pcapng"));
+        vec_to_pcap(res.wanted.as_slice(), Path::new("./target/wanted.pcapng"));
+        panic!("Responses are not equal. See ./target/got.pcapng and ./target/wanted.pcapng");
     }
 }
 
@@ -132,21 +138,23 @@ pub fn intel_pxe() {
     let mut pxe_socket = PxeSocket::new(server_ip, server_mac, &pxe_image);
 
     // Emulate the DHCP Discover phase
-    let res = cmp_impl_responses(&mut pxe_socket, Path::new("./assets/intel_dhcp.pcapng"));
-    assert_eq!(res.orig_send, res.impl_send);
+    let res = cmp_impl_responses(
+        &mut pxe_socket,
+        Path::new("./assets/intel_dhcp.pcapng"),
+        |e| panic!("{}", e),
+    );
+    verify_responses(&res);
 
     // Emulate the TFTP phase
-    let res = cmp_impl_responses(&mut pxe_socket, Path::new("./assets/intel_tftp.pcapng"));
-
-    if res.orig_send != res.impl_send {
-        vec_to_pcap(
-            res.impl_send.as_slice(),
-            Path::new("./target/tftp_failed.pcapng"),
-        );
-        vec_to_pcap(
-            res.orig_send.as_slice(),
-            Path::new("./target/tftp_orig.pcapng"),
-        );
-        panic!("TFTP failed");
-    }
+    let res = cmp_impl_responses(
+        &mut pxe_socket,
+        Path::new("./assets/intel_tftp.pcapng"),
+        |e| {
+            match e {
+                // Error::Tftp(e) => (),
+                _ => panic!("Unexpected error: {}", e),
+            }
+        },
+    );
+    verify_responses(&res);
 }

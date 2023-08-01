@@ -58,6 +58,7 @@ pub struct DhcpReprWrapper {
 pub fn pxe_ack(
     info: &PxeClientInfo,
     endpoint: &smoltcp::wire::IpListenEndpoint,
+    boot_file: &str,
 ) -> DhcpReprWrapper {
     const IP_NULL: Ipv4Address = Ipv4Address([0, 0, 0, 0]);
 
@@ -75,17 +76,9 @@ pub fn pxe_ack(
     };
     let options: Vec<DhcpOptionWrapper> = vec![];
 
-    // let boot_file: String = f!(
-    //     "http://{}:7777/ipxe?client_id={}",
-    //     server_ip,
-    //     info.client_identifier
-    // );
-
-    let boot_file = "kernel.elf".to_string();
-
     DhcpReprWrapperBuilder {
         mdata: options,
-        boot_file,
+        boot_file: boot_file.to_owned(),
         options_builder: |mdata: &Vec<DhcpOptionWrapper>| {
             let options: Vec<DhcpOption> = mdata.iter().map(|x| x.into()).collect();
             options
@@ -123,7 +116,11 @@ pub fn pxe_ack(
     .build()
 }
 
-pub fn pxe_offer(info: &PxeClientInfo, server_ip: &Ipv4Address) -> DhcpReprWrapper {
+pub fn pxe_offer(
+    info: &PxeClientInfo,
+    server_ip: &Ipv4Address,
+    boot_file: &str,
+) -> DhcpReprWrapper {
     const IP_NULL: Ipv4Address = Ipv4Address([0, 0, 0, 0]);
 
     let client_addr = match info.client_identifier.hardware_type {
@@ -157,11 +154,9 @@ pub fn pxe_offer(info: &PxeClientInfo, server_ip: &Ipv4Address) -> DhcpReprWrapp
         //     vendor_options.as_slice().into(),
     ];
 
-    let boot_file = "kernel.elf".to_string();
-
     DhcpReprWrapperBuilder {
         mdata: options,
-        boot_file,
+        boot_file: boot_file.to_owned(),
         options_builder: |mdata: &Vec<DhcpOptionWrapper>| {
             let options: Vec<DhcpOption> = mdata.iter().map(|x| x.into()).collect();
             options

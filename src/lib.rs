@@ -101,8 +101,9 @@ pub enum TftpStates {
 
 #[derive(Debug)]
 pub struct PxeSocket {
-    state: PxeStates,
+    _state: PxeStates,
     stage_one: PathBuf,
+    stage_one_name: String,
     transfers: HashMap<TftpConnection, Transfer<TestTftp>>,
     server_mac: EthernetAddress,
     server_ip: Ipv4Address,
@@ -117,14 +118,22 @@ impl PxeSocket {
         self.server_mac
     }
     pub fn get_state(&self) -> &PxeStates {
-        &self.state
+        &self._state
     }
     pub fn get_stage_one(&self) -> &PathBuf {
         &self.stage_one
     }
+    fn set_state(&mut self, state: PxeStates) {
+        debug!("Changing state to {:?}", state);
+        self._state = state;
+    }
 
     pub fn new(server_ip: Ipv4Address, server_mac: EthernetAddress, stage_one: &Path) -> Self {
-        log::info!("Starting server with ip: {}", server_ip);
+        log::info!(
+            "Creating pxe socket with ip: {} and mac {}",
+            server_ip,
+            server_mac
+        );
 
         // Find free tftp port in userspace range
         let tftp_endpoint = {
@@ -144,18 +153,25 @@ impl PxeSocket {
 
         let transfers: HashMap<TftpConnection, Transfer<TestTftp>> = HashMap::new();
 
+        let stage_one_name = stage_one.file_name().unwrap().to_str().unwrap().to_string();
+
+        if stage_one_name.len() > 127 {
+            panic!("Stage one file name is too long");
+        }
+
         Self {
-            state,
+            _state: state,
             transfers,
             server_mac,
             server_ip,
             tftp_endpoint,
             stage_one: stage_one.to_path_buf(),
+            stage_one_name,
         }
     }
 
     pub fn process(&mut self, rx_buffer: &[u8]) -> Result<Vec<u8>> {
-        match self.state {
+        match self.get_state() {
             PxeStates::Discover => {
                 /* ================== Parse PXE Discover ================== */
                 /*
@@ -187,8 +203,7 @@ impl PxeSocket {
                 address field is null (0.0.0.0). If this is a DHCP Service, then the returned client IP address
                 field is valid.
                 */
-
-                let dhcp_repr = construct::pxe_offer(&info, &self.server_ip);
+                let dhcp_repr = construct::pxe_offer(&info, &self.server_ip, &self.stage_one_name);
                 let packet = utils::dhcp_to_ether_brdcast(
                     dhcp_repr.borrow_repr(),
                     &self.server_ip,
@@ -210,7 +225,7 @@ impl PxeSocket {
                 an acknowledgment from the Service. If the client selects an IP address from a BOOTP reply, it can
                 simply use the address.
                 */
-                self.state = PxeStates::Request(info.transaction_id);
+                self.set_state(PxeStates::Request(info.transaction_id));
 
                 Ok(packet)
             }
@@ -242,7 +257,7 @@ impl PxeSocket {
                         return Err(Error::Ignore("Not a dhcp request packet".to_string()));
                     }
 
-                    if info.transaction_id != transaction_id {
+                    if info.transaction_id != *transaction_id {
                         return Err(Error::Ignore("Not the same transaction id".to_string()));
                     }
 
@@ -260,7 +275,9 @@ impl PxeSocket {
                     - MTFTP configuration parameters.
                     - Any other options the NBP requires before it can be successfully executed.
                 */
-                let dhcp_repr = construct::pxe_ack(&info, &self.tftp_endpoint);
+
+                let dhcp_repr =
+                    construct::pxe_ack(&info, &self.tftp_endpoint, &self.stage_one_name);
                 let packet = utils::dhcp_to_ether_unicast(
                     dhcp_repr.borrow_repr(),
                     &ip,
@@ -276,14 +293,14 @@ impl PxeSocket {
                 (port assigned in Boot Server Ack packet). The file downloaded and the placement of the
                 downloaded code in memory is dependent on the client’s CPU architecture.
                 */
-                log::info!("Changing to tftp tsize state");
-                self.state = PxeStates::Tftp(TftpStates::Tsize);
+
+                self.set_state(PxeStates::Tftp(TftpStates::Tsize));
 
                 Ok(packet)
             }
             PxeStates::ArpRequest => {
                 let packet = self.arp_respond(rx_buffer)?;
-                self.state = PxeStates::Tftp(TftpStates::Tsize);
+                self.set_state(PxeStates::Tftp(TftpStates::Tsize));
 
                 Ok(packet)
             }
@@ -292,27 +309,62 @@ impl PxeSocket {
 
                 match tftp_state {
                     TftpStates::Tsize => {
-                        let packet = self.reply_tsize(&wrapper, tftp_con).unwrap();
+                        let ack_opts = self.parse_ack_options(&wrapper, tftp_con)?;
 
-                        log::info!("Changing to blksize state");
-                        self.state = PxeStates::Tftp(TftpStates::BlkSize);
-
+                        if ack_opts.contains_key("tsize") && ack_opts.contains_key("blksize") {
+                            let blksize =
+                                ack_opts.get("blksize").unwrap().parse::<usize>().unwrap();
+                            self.set_state(PxeStates::Tftp(TftpStates::Data { blksize }));
+                        } else if ack_opts.contains_key("tsize") {
+                            self.set_state(PxeStates::Tftp(TftpStates::BlkSize));
+                        } else {
+                            return Err(Error::Tftp(f!(
+                                "Missing tsize option. Got options: {:?}",
+                                ack_opts
+                            )));
+                        }
+                        let packet = self.ack_options(&ack_opts, &tftp_con)?;
                         Ok(packet)
                     }
                     TftpStates::BlkSize => {
-                        let (packet, blksize) = self.reply_blksize(&wrapper, tftp_con)?;
+                        let ack_opts = {
+                            match self.parse_ack_options(&wrapper, tftp_con) {
+                                Ok(ack_opts) => ack_opts,
+                                Err(e) => {
+                                    if let Error::TftpReceivedError(code, msg) = e {
+                                        if code == 0 {
+                                            return Err(Error::IgnoreNoLog(msg));
+                                        } else {
+                                            return Err(Error::TftpReceivedError(code, msg));
+                                        }
+                                    } else {
+                                        return Err(e);
+                                    }
+                                }
+                            }
+                        };
 
-                        log::info!("Changing to tftp data state");
-                        self.state = PxeStates::Tftp(TftpStates::Data { blksize });
+                        match ack_opts.get("blksize") {
+                            Some(blksize) => {
+                                let blksize = blksize.parse::<usize>().unwrap();
+                                self.set_state(PxeStates::Tftp(TftpStates::Data { blksize }));
+                            }
+                            None => {
+                                return Err(Error::Tftp(f!(
+                                    "Missing blksize option. Got options: {:?}",
+                                    ack_opts
+                                )));
+                            }
+                        }
 
+                        let packet = self.ack_options(&ack_opts, &tftp_con)?;
                         Ok(packet)
                     }
                     TftpStates::Data { blksize } => {
                         match self.reply_data(&wrapper, tftp_con, *blksize) {
                             Ok(packet) => Ok(packet),
                             Err(Error::TftpEndOfFile) => {
-                                log::info!("Changing to tftp done state");
-                                self.state = PxeStates::Done;
+                                self.set_state(PxeStates::Done);
                                 Err(Error::IgnoreNoLog("End of file reached".to_string()))
                             }
                             Err(e) => Err(e),
@@ -323,7 +375,7 @@ impl PxeSocket {
             }
             PxeStates::Done => {
                 log::info!("PXE Done");
-                self.state = PxeStates::Discover;
+                self.set_state(PxeStates::Discover);
                 self.transfers.clear();
                 Err(Error::IgnoreNoLog("PXE Done".to_string()))
             }
@@ -369,7 +421,7 @@ impl PxeSocket {
                 Ok(packet)
             }
             (Repr::Error { code, msg }, None | Some(_)) => {
-                Err(Error::Tftp(f!("tftp error: {} code: {:?}", msg, code)))
+                Err(Error::TftpReceivedError(code.into(), msg.to_string()))
             }
             (packet, ..) => Err(Error::Tftp(f!(
                 "Received unexpected tftp packet: {:?}. ",
@@ -378,102 +430,38 @@ impl PxeSocket {
         }
     }
 
-    pub fn reply_blksize(
+    pub fn ack_options(
         &mut self,
-        wrapper: &TftpPacketWrapper,
-        tftp_con: TftpConnection,
-    ) -> Result<(Vec<u8>, usize)> {
-        let xfer_idx = self.transfers.get(&tftp_con);
-        {
-            match (*wrapper.borrow_repr(), xfer_idx) {
-                (
-                    Repr::ReadRequest {
-                        filename: _,
-                        mode,
-                        opts,
-                    },
-                    None,
-                ) => {
-                    if mode != tftp::Mode::Octet {
-                        return Err(Error::Tftp("Only octet mode is supported".to_string()));
-                    }
+        ack_opts: &HashMap<String, String>,
+        tftp_con: &TftpConnection,
+    ) -> Result<Vec<u8>> {
+        let needed_bytes = ack_opts
+            .iter()
+            .fold(0, |acc, (name, value)| acc + name.len() + value.len() + 2);
 
-                    let _t = {
-                        let xfer_idx = TestTftp {
-                            file: File::open(&self.stage_one)
-                                .expect("Failed to open stage one bootloader"),
-                        };
+        let mut resp_opt_buf = vec![0u8; needed_bytes];
+        let mut written_bytes = 0;
+        let mut opt_resp = tftp::TftpOptsWriter::new(resp_opt_buf.as_mut_slice());
 
-                        let transfer =
-                            Transfer::new(xfer_idx, tftp_con, *wrapper.borrow_is_write());
-
-                        self.transfers.insert(tftp_con, transfer);
-                        self.transfers.get_mut(&tftp_con).unwrap()
-                    };
-
-                    let options = {
-                        let mut map = HashMap::new();
-                        for opt in opts.options() {
-                            map.insert(opt.name, opt.value);
-                        }
-                        map
-                    };
-
-                    if let Some(&blksize) = options.get("blksize") {
-                        let blksize = match blksize.parse::<usize>() {
-                            Ok(blksize) => blksize,
-                            Err(_) => {
-                                return Err(Error::Tftp(f!(
-                                    "tftp: blksize option should be a number is however {}",
-                                    blksize
-                                )));
-                            }
-                        };
-
-                        log::debug!("Acking blksize: {}", blksize);
-
-                        let blksize_response = blksize.to_string();
-                        let mut opt_buf = [0u8; 64];
-                        let opts = {
-                            let opt = TftpOption {
-                                name: "blksize",
-                                value: &blksize_response,
-                            };
-
-                            let mut opt_resp = tftp::TftpOptsWriter::new(&mut opt_buf);
-                            opt_resp.emit(opt).unwrap();
-                            let written_bytes = opt_resp.len();
-                            tftp::TftpOptsReader::new(&opt_buf[..written_bytes])
-                        };
-
-                        let ack = Repr::OptionAck { opts };
-
-                        let packet = crate::utils::tftp_to_ether_unicast(&ack, &tftp_con);
-
-                        Ok((packet, blksize))
-                    } else {
-                        Err(Error::Tftp("tftp: blksize option not found".to_string()))
-                    }
-                }
-                (Repr::Error { code, msg }, None | Some(_)) => match code {
-                    tftp::ErrorCode::Undefined => Err(Error::Ignore(
-                        "Expected undefined tftp error as response. Ignoring".to_string(),
-                    )),
-                    _ => Err(Error::Tftp(f!("tftp error: {} code: {:?}", msg, code))),
-                },
-                (packet, ..) => Err(Error::Tftp(f!(
-                    "Received unexpected tftp packet: {:?}. ",
-                    packet
-                ))),
-            }
+        for (name, value) in ack_opts {
+            let opt = TftpOption { name, value };
+            opt_resp.emit(opt).unwrap();
+            written_bytes += opt_resp.len();
         }
+
+        debug_assert!(written_bytes == needed_bytes);
+        let opts = tftp::TftpOptsReader::new(&resp_opt_buf[..written_bytes]);
+
+        let ack = Repr::OptionAck { opts };
+        let packet = crate::utils::tftp_to_ether_unicast(&ack, tftp_con);
+        Ok(packet)
     }
 
-    pub fn reply_tsize(
+    pub fn parse_ack_options(
         &mut self,
         wrapper: &TftpPacketWrapper,
         tftp_con: TftpConnection,
-    ) -> Result<Vec<u8>> {
+    ) -> Result<HashMap<String, String>> {
         let xfer_idx = self.transfers.get(&tftp_con);
         {
             match (*wrapper.borrow_repr(), xfer_idx) {
@@ -489,7 +477,7 @@ impl PxeSocket {
                         return Err(Error::Tftp("Only octet mode is supported".to_string()));
                     }
 
-                    let t = {
+                    let t: &mut Transfer<TestTftp> = {
                         let xfer_idx = TestTftp {
                             file: File::open(self.get_stage_one()).unwrap(),
                         };
@@ -507,49 +495,36 @@ impl PxeSocket {
                         if t.is_write { "write" } else { "read" },
                         tftp_con
                     );
-                    let options = {
-                        let mut map = HashMap::new();
-                        for opt in opts.options() {
-                            map.insert(opt.name, opt.value);
+
+                    let mut ack_opts: HashMap<String, String> = HashMap::new();
+                    for opt in opts.options() {
+                        let (name, value) = (opt.name, opt.value);
+
+                        match name {
+                            "blksize" => {
+                                let blksize = match value.parse::<usize>() {
+                                    Ok(blksize) => blksize,
+                                    Err(_) => {
+                                        return Err(Error::Tftp(f!(
+                                            "tftp: blksize option should be a number is however {}",
+                                            value
+                                        )));
+                                    }
+                                };
+                                ack_opts.insert(name.to_string(), blksize.to_string());
+                            }
+                            "tsize" => {
+                                let tsize = t.handle.file.metadata()?.len();
+                                ack_opts.insert(name.to_string(), tsize.to_string());
+                            }
+                            _ => {}
                         }
-                        map
-                    };
-
-                    if let Some(&tsize) = options.get("tsize") {
-                        if tsize != "0" {
-                            return Err(Error::Tftp(f!(
-                                "tftp: tsize option should be zero is however {}",
-                                tsize
-                            )));
-                        }
-
-                        let tsize = t.handle.file.metadata()?.len();
-
-                        let tsize_response = tsize.to_string();
-
-                        let mut opt_buf = [0u8; 64];
-                        let opts = {
-                            let opt = TftpOption {
-                                name: "tsize",
-                                value: &tsize_response,
-                            };
-
-                            let mut opt_resp = tftp::TftpOptsWriter::new(&mut opt_buf);
-                            opt_resp.emit(opt).unwrap();
-                            let written_bytes = opt_resp.len();
-                            tftp::TftpOptsReader::new(&opt_buf[..written_bytes])
-                        };
-
-                        let ack = Repr::OptionAck { opts };
-                        let packet = crate::utils::tftp_to_ether_unicast(&ack, &tftp_con);
-
-                        Ok(packet)
-                    } else {
-                        Err(Error::Tftp("tftp: tsize option not found".to_string()))
                     }
+
+                    Ok(ack_opts)
                 }
                 (Repr::Error { code, msg }, None | Some(_)) => {
-                    Err(Error::Tftp(f!("tftp error: {} code: {:?}", msg, code)))
+                    Err(Error::TftpReceivedError(code.into(), msg.to_string()))
                 }
                 (packet, ..) => Err(Error::Tftp(f!(
                     "Received unexpected tftp packet: {:?}. ",
