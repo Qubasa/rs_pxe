@@ -1,13 +1,43 @@
 #!/usr/bin/env bash
 
 set -euo pipefail
- 
-set -x
+
 
 LAN=enp2s0
 BRIDGE=kmania_br0
 QEMU_IF=qemu_tap
 RUST_IF=rust_tap
+
+# Initialize local variables
+uefi_pxe=false
+ipxe=false
+
+# Loop over the arguments
+while [[ $# -gt 0 ]]; do
+  # Check the argument value
+  case $1 in
+    --uefi_pxe) # Set uefi_pxe to true if --uefi_pxe is present
+      uefi_pxe=true
+      ;;
+    --ipxe) # Set ipxe to true if --ipxe is present
+      ipxe=true
+      ;;
+    *) # Ignore other arguments
+      ;;
+  esac
+  # Shift to the next argument
+  shift
+done
+
+# Check if both arguments are false
+if [[ $uefi_pxe == false && $ipxe == false ]]; then
+  # Print a help text and exit with an error code
+  echo "Usage: $0 [--uefi_pxe] [--ipxe]"
+  echo "At least one of the arguments must be specified."
+  exit 1
+fi
+
+set -x
 
 function reset_net {
   sudo dhcpcd -f ./assets/dhcpcd.conf -k $BRIDGE || true
@@ -73,14 +103,23 @@ sudo setcap cap_net_admin,cap_net_raw=eip ./target/debug/rs_pxe
 ./target/debug/rs_pxe -l DEBUG --ipxe ./assets/ipxe.pxe --raw -i $LAN &
 
 # IPXE Boot Emulation
-#qemu-system-x86_64 -enable-kvm -m 1024 -name qemu_ipxe,process=qemu_ipxe -net nic -net tap,ifname="$QEMU_IF",script=no,downscript=no -fda ./assets/ipxe.dsk -snapshot -serial stdio -display none
+if $ipxe; then
+  qemu-system-x86_64 -enable-kvm -m 256M \
+  -name qemu_ipxe,process=qemu_ipxe \
+  -net nic -net tap,ifname="$QEMU_IF",script=no,downscript=no \
+  -fda ./assets/ipxe.dsk -snapshot \
+  -serial stdio -display none
+fi
 
 # UEFI EDK2 Boot Emulation
-qemu-system-x86_64 -enable-kvm -m 256M -nodefaults \
-    -net nic -net tap,ifname="$QEMU_IF",script=no,downscript=no \
-   	-drive if=pflash,format=raw,readonly=on,file=$OVMF \
-    -serial stdio -vga none -nographic -monitor none \
-    -snapshot
+if $uefi_pxe; then
+  qemu-system-x86_64 -enable-kvm -m 256M -nodefaults \
+      -name qemu_ipxe,process=qemu_ipxe \
+      -net nic -net tap,ifname="$QEMU_IF",script=no,downscript=no \
+      -drive if=pflash,format=raw,readonly=on,file=$OVMF \
+      -serial stdio -vga none -nographic -monitor none \
+      -snapshot
+fi
 EOF
 )
 
