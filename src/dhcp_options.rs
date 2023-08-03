@@ -62,6 +62,7 @@ pub enum SubsetDhcpOption {
     MessageType = 53,
     ServerIdentifier = 54,
     MaximumMessageSize = 57,
+    UserClassInformation = 77,
     End = 255,
 }
 
@@ -85,6 +86,7 @@ impl TryFrom<u8> for SubsetDhcpOption {
             53 => Ok(SubsetDhcpOption::MessageType),
             54 => Ok(SubsetDhcpOption::ServerIdentifier),
             57 => Ok(SubsetDhcpOption::MaximumMessageSize),
+            77 => Ok(SubsetDhcpOption::UserClassInformation),
             255 => Ok(SubsetDhcpOption::End),
             e => Err(Error::UnknownDhcpValue(e.into())),
         }

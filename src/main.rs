@@ -124,7 +124,15 @@ fn main() {
 
         loop {
             let fd: i32 = device.as_raw_fd();
-            phy_wait(fd, None).unwrap();
+            let timeout = Some(Duration::from_secs(1));
+
+            match phy_wait(fd, timeout) {
+                Ok(_) => {}
+                Err(e) => {
+                    debug!("Error: {:?}", e);
+                    continue;
+                }
+            }
             let (rx, tx) = device.receive(Instant::now()).unwrap();
 
             let packet = rx.consume(|buffer| pxe_socket.process(buffer));

@@ -1,3 +1,5 @@
+use crate::TftpError;
+
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     /// For starter, to remove as code matures.
@@ -32,7 +34,7 @@ pub enum Error {
     Tftp(String),
 
     #[error("Tftp received Error {0}: {1}")]
-    TftpReceivedError(u16, String),
+    TftpReceivedError(TftpError, String),
 
     #[error("Tftp end of file")]
     TftpEndOfFile,

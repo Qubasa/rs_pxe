@@ -9,6 +9,12 @@ use crate::prelude::*;
 use std::convert::TryFrom;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
+pub enum FirmwareType {
+    Uknown,
+    IPxe,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct PxeClientInfo {
     pub client_arch: ClientArchType,
     /// Optionally identify the vendor type and configuration of a DHCP client
@@ -19,6 +25,7 @@ pub struct PxeClientInfo {
     pub client_identifier: ClientIdentifier,
     pub transaction_id: u32,
     pub secs: u16,
+    pub firmware_type: FirmwareType,
 }
 
 pub fn pxe_discover(dhcp: DhcpPacket<&[u8]>) -> Result<PxeClientInfo> {
@@ -28,6 +35,7 @@ pub fn pxe_discover(dhcp: DhcpPacket<&[u8]>) -> Result<PxeClientInfo> {
     let mut network_interface_version: Option<NetworkInterfaceVersion> = None;
     let mut client_uuid: Option<PxeUuid> = None;
     let mut client_identifier: Option<ClientIdentifier> = None;
+    let mut firmware_type: FirmwareType = FirmwareType::Uknown;
 
     if dhcp.opcode() != DhcpMessageType::Request.opcode() {
         return Err(Error::Ignore("Not a dhcp request".to_string()));
@@ -69,6 +77,21 @@ pub fn pxe_discover(dhcp: DhcpPacket<&[u8]>) -> Result<PxeClientInfo> {
                 SubsetDhcpOption::ParameterRequestList | SubsetDhcpOption::MaximumMessageSize => {
                     // Ignore
                 }
+                SubsetDhcpOption::UserClassInformation => {
+                    // iPXE implements this options not adhering to the specification
+                    // But we need it to detect iPXE clients
+
+                    match core::str::from_utf8(option.data) {
+                        Ok(i) => {
+                            if i == "iPXE" {
+                                firmware_type = FirmwareType::IPxe;
+                            } else {
+                                warn!("Unknown firmware type: {}", i);
+                            }
+                        }
+                        Err(_) => warn!("UserClassInformation is not valid utf8"),
+                    };
+                }
                 _ => {
                     warn!("Unhandled PXE option: {:?}", opt_kind)
                 }
@@ -86,6 +109,7 @@ pub fn pxe_discover(dhcp: DhcpPacket<&[u8]>) -> Result<PxeClientInfo> {
     }
 
     Ok(PxeClientInfo {
+        firmware_type,
         client_arch: client_arch.ok_or(Error::MissingDhcpOption)?,
         vendor_id,
         client_identifier: client_identifier.ok_or(Error::MissingDhcpOption)?,

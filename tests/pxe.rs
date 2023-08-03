@@ -8,8 +8,16 @@ use pcap_file::pcapng::{
 };
 use rs_pxe::{prelude::Error, *};
 use smoltcp::wire::{EthernetAddress, EthernetFrame, Ipv4Address};
-use std::io::Write;
 use std::{borrow::Cow, fs::File, path::Path, str::FromStr, time::Duration, vec};
+use std::{io::Write, sync::Once};
+
+static INIT: Once = Once::new();
+
+pub fn setup() {
+    INIT.call_once(|| {
+        setup_logging(LevelFilter::Debug);
+    });
+}
 
 pub fn setup_logging(level: LevelFilter) {
     env_logger::Builder::new()
@@ -68,7 +76,7 @@ fn cmp_impl_responses(
         let block = match block.clone().into_enhanced_packet() {
             Some(block) => block,
             None => {
-                println!("Not an enhanced packet block: {:?}", block);
+                trace!("Not an enhanced packet block: {:?}", block);
                 continue;
             }
         };
@@ -102,6 +110,7 @@ fn verify_responses(res: &Responses) {
     if res.wanted != res.got {
         vec_to_pcap(res.got.as_slice(), Path::new("./target/got.pcapng"));
         vec_to_pcap(res.wanted.as_slice(), Path::new("./target/wanted.pcapng"));
+        info!("Hint: Use qtwirediff to compare the two files");
         panic!("Responses are not equal. See ./target/got.pcapng and ./target/wanted.pcapng");
     }
 }
@@ -130,8 +139,8 @@ fn vec_to_pcap(data: &[Vec<u8>], file_path: &Path) {
 
 #[test]
 pub fn intel_pxe() {
-    setup_logging(LevelFilter::Debug);
-    info!("Starting test");
+    setup();
+
     let server_ip = Ipv4Address::new(192, 168, 178, 97);
     let server_mac = EthernetAddress::from_bytes(&[0x98, 0xfa, 0x9b, 0x4b, 0xb2, 0xc4]);
     let pxe_image = std::path::PathBuf::from_str("./assets/ipxe.pxe").unwrap();
@@ -149,12 +158,34 @@ pub fn intel_pxe() {
     let res = cmp_impl_responses(
         &mut pxe_socket,
         Path::new("./assets/intel_tftp.pcapng"),
-        |e| {
-            match e {
-                // Error::Tftp(e) => (),
-                _ => panic!("Unexpected error: {}", e),
-            }
-        },
+        |e| panic!("{}", e),
+    );
+    verify_responses(&res);
+}
+
+#[test]
+pub fn ipxe() {
+    setup();
+
+    let server_ip = Ipv4Address::new(192, 168, 178, 97);
+    let server_mac = EthernetAddress::from_bytes(&[0x98, 0xfa, 0x9b, 0x4b, 0xb2, 0xc4]);
+    let pxe_image = std::path::PathBuf::from_str("./assets/ipxe.pxe").unwrap();
+    let mut pxe_socket = PxeSocket::new(server_ip, server_mac, &pxe_image);
+
+    // Emulate the DHCP Discover phase
+    let res = cmp_impl_responses(
+        &mut pxe_socket,
+        Path::new("./assets/ipxe_dhcp.pcapng"),
+        |e| panic!("{}", e),
+    );
+    verify_responses(&res);
+
+    assert_eq!(pxe_socket.get_state(), &PxeStates::Tftp(TftpStates::Tsize));
+
+    let res = cmp_impl_responses(
+        &mut pxe_socket,
+        Path::new("./assets/ipxe_tftp.pcapng"),
+        |e| panic!("{}", e),
     );
     verify_responses(&res);
 }
