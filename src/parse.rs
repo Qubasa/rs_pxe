@@ -110,12 +110,14 @@ pub fn pxe_discover(dhcp: DhcpPacket<&[u8]>) -> Result<PxeClientInfo> {
 
     Ok(PxeClientInfo {
         firmware_type,
-        client_arch: client_arch.ok_or(Error::MissingDhcpOption)?,
+        client_arch: client_arch.ok_or(Error::MissingDhcpOption("Client Architecture"))?,
         vendor_id,
-        client_identifier: client_identifier.ok_or(Error::MissingDhcpOption)?,
-        client_uuid: client_uuid.ok_or(Error::MissingDhcpOption)?,
-        msg_type: msg_type.ok_or(Error::MissingDhcpOption)?,
-        network_interface_version: network_interface_version.ok_or(Error::MissingDhcpOption)?,
+        client_identifier: client_identifier
+            .ok_or(Error::MissingDhcpOption("Client Identifier"))?,
+        client_uuid: client_uuid.ok_or(Error::MissingDhcpOption("Client UUID"))?,
+        msg_type: msg_type.ok_or(Error::MissingDhcpOption("Message Type"))?,
+        network_interface_version: network_interface_version
+            .ok_or(Error::MissingDhcpOption("Network Interface Version"))?,
         transaction_id: dhcp.transaction_id(),
         secs: dhcp.secs(),
     })

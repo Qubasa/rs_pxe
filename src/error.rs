@@ -18,8 +18,8 @@ pub enum Error {
     #[error("Unknown DHCP value")]
     UnknownDhcpValue(u64),
 
-    #[error("Missing DHCP option")]
-    MissingDhcpOption,
+    #[error("Missing DHCP option: {0}")]
+    MissingDhcpOption(&'static str),
 
     #[error("Invalid Packet: {0}")]
     Malformed(String),

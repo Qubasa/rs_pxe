@@ -112,6 +112,7 @@
           RUST_SRC_PATH = rustPlatform.rustLibSrc;
           shellHook = ''
             export  QEMU_SHARE=${pkgs.qemu}/share/qemu/
+            export SYSLINUX=${pkgs.syslinux}
             export RUST_BACKTRACE=1
             export PATH=$PATH:~/.cargo/bin
             export RUST_ANALYZER=${pkgs.rust-analyzer-nightly}/bin/rust-analyzer

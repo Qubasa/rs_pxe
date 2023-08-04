@@ -422,12 +422,17 @@ impl PxeSocket {
                     TftpStates::Tsize => {
                         let trans = self.parse_ack_options(&wrapper, tftp_con).unwrap();
 
+                        // If both tsize and blksize are present, we can go straight to data state
                         if trans.options.has(TftpOptionEnum::Tsize)
                             && trans.options.has(TftpOptionEnum::Blksize)
                         {
                             self.set_state(PxeStates::Tftp(TftpStates::Data));
+
+                        // If only tsize is present, we need to request blksize
                         } else if trans.options.has(TftpOptionEnum::Tsize) {
                             self.set_state(PxeStates::Tftp(TftpStates::BlkSize));
+
+                        // Else throw error
                         } else {
                             return Err(Error::Tftp(f!(
                                 "Missing tsize option. Got options: {:?}",
