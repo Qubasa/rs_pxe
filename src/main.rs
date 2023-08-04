@@ -121,19 +121,48 @@ fn main() {
         let server_ip: Ipv4Address = iface.ipv4_addr().unwrap();
 
         let mut pxe_socket = PxeSocket::new(server_ip, server_mac, &pxe_image);
+        let fd: i32 = device.as_raw_fd();
+        let mut last_time: Instant = Instant::now();
 
         loop {
-            let fd: i32 = device.as_raw_fd();
-            let timeout = Some(Duration::from_secs(1));
-
-            match phy_wait(fd, timeout) {
-                Ok(_) => {}
-                Err(e) => {
-                    debug!("Error: {:?}", e);
+            let timeout = Some(Duration::from_millis(250));
+            match pxe_socket.process_timeout() {
+                Ok(packet) => {
+                    let mut tx = device.transmit(Instant::now()).unwrap();
+                    debug!("Resending last packet.");
+                    tx.consume(packet.len(), |buffer| {
+                        buffer.copy_from_slice(&packet);
+                        Ok::<(), Error>(())
+                    })
+                    .unwrap();
                     continue;
                 }
+                Err(Error::StopTftpConnection(packet)) => {
+                    let mut tx = device.transmit(Instant::now()).unwrap();
+                    debug!("Sending Tftp Error");
+                    tx.consume(packet.len(), |buffer| {
+                        buffer.copy_from_slice(&packet);
+                        Ok::<(), Error>(())
+                    })
+                    .unwrap();
+                    pxe_socket.reset_transfer();
+                    continue;
+                }
+                Err(Error::Ignore(_) | Error::IgnoreNoLog(_)) => (),
+                Err(e) => panic!("{}", e),
             }
-            let (rx, tx) = device.receive(Instant::now()).unwrap();
+
+            phy_wait(fd, timeout).unwrap();
+
+            let (rx, tx) = match device.receive(Instant::now()) {
+                Some(res) => res,
+                None => {
+                    let diff = Instant::now() - last_time;
+                    last_time = Instant::now();
+                    trace!("Last timeout was {}ms ago", diff.millis());
+                    continue;
+                }
+            };
 
             let packet = rx.consume(|buffer| pxe_socket.process(buffer));
 
@@ -157,23 +186,27 @@ fn main() {
             }
         }
     } else if matches.opt_present("tap") {
-        // let mut device = smoltcp::phy::TunTapInterface::new(&interface, Medium::Ethernet).unwrap();
+        let mut device = smoltcp::phy::TunTapInterface::new(&interface, Medium::Ethernet).unwrap();
 
-        // // Create interface
-        // let mut config = match device.capabilities().medium {
-        //     Medium::Ethernet => Config::new(Into::into(*hardware_addr)),
-        //     Medium::Ip => panic!("Tap interface does not support IP"),
-        //     Medium::Ieee802154 => todo!(),
-        // };
-        // config.random_seed = rand::random();
-        // let mut iface = Interface::new(config, &mut device);
+        // Create interface
+        let mut config = match device.capabilities().medium {
+            Medium::Ethernet => Config::new(Into::into(*hardware_addr)),
+            Medium::Ip => panic!("Tap interface does not support IP"),
+            Medium::Ieee802154 => todo!(),
+        };
+        config.random_seed = rand::random();
+        let mut iface = Interface::new(config, &mut device);
 
-        // utils::get_ip(&mut device, &mut iface);
+        utils::get_ip(&mut device, &mut iface);
 
-        // let mut socket = MyRawSocket::new(device, iface);
-        // let mut pxe_socket = PxeSocket::new(&socket);
-        // pxe_socket.process(&mut socket);
-        todo!("Tap not supported yet");
+        // Get interface mac and ip
+        let server_mac = match iface.hardware_addr() {
+            HardwareAddress::Ethernet(addr) => addr,
+            _ => panic!("Currently we only support ethernet"),
+        };
+        let server_ip: Ipv4Address = iface.ipv4_addr().unwrap();
+
+        todo!();
     } else if matches.opt_present("tun") {
         // let mut device = smoltcp::phy::TunTapInterface::new(&interface, Medium::Ip).unwrap();
 

@@ -147,7 +147,6 @@ pub enum PxeStates {
     Request(u32),
     ArpRequest,
     Tftp(TftpStates),
-    Done,
 }
 
 impl Display for PxeStates {
@@ -159,7 +158,6 @@ impl Display for PxeStates {
             }
             PxeStates::ArpRequest => write!(f, "ArpRequest"),
             PxeStates::Tftp(tftp_state) => write!(f, "Tftp({})", tftp_state),
-            PxeStates::Done => write!(f, "Done"),
         }
     }
 }
@@ -213,18 +211,26 @@ impl PxeSocket {
         debug!("Changing state to {}", state);
         self._state = state;
     }
+    pub fn reset_transfer(&mut self) {
+        self.transfer = None;
+        self.set_state(PxeStates::Tftp(TftpStates::Tsize));
+    }
 
-    // pub fn process_timeout(&self) -> Option<Vec<u8>> {
-    //     for (con, trans) in self.transfers.iter() {
-    //         if trans.timeout <= Instant::now() {
-    //             //let packet = crate::utils::tftp_to_ether_unicast(&, con);
-    //             todo!();
-    //             //return Some(packet);
-    //         }
-    //     }
-
-    //     None
-    // }
+    pub fn process_timeout(&mut self) -> Result<Vec<u8>> {
+        if let Some(trans) = &mut self.transfer {
+            return match trans.process_timeout() {
+                Ok(packet) => Ok(packet),
+                Err(Error::MaxRetriesExceeded) => {
+                    error!("Killing connection. Sending timeout");
+                    let packet = trans.send_timeout().unwrap();
+                    Err(Error::StopTftpConnection(packet))
+                }
+                Err(Error::Ignore(_) | Error::IgnoreNoLog(_)) => Err(Error::Ignore("".to_string())),
+                Err(e) => panic!("Error: {}", e),
+            };
+        }
+        Err(Error::IgnoreNoLog("".to_string()))
+    }
 
     pub fn new(server_ip: Ipv4Address, server_mac: EthernetAddress, stage_one: &Path) -> Self {
         log::info!(
@@ -468,19 +474,14 @@ impl PxeSocket {
                     TftpStates::Data => match self.reply_data(&wrapper) {
                         Ok(packet) => Ok(packet),
                         Err(Error::TftpEndOfFile) => {
-                            self.set_state(PxeStates::Done);
+                            self.transfer = None;
+                            self.set_state(PxeStates::Discover);
                             Err(Error::IgnoreNoLog("End of file reached".to_string()))
                         }
                         Err(e) => panic!("Received unexpected tftp error: {}", e),
                     },
                     TftpStates::Error => todo!(),
                 }
-            }
-            PxeStates::Done => {
-                log::info!("PXE Done");
-                self.set_state(PxeStates::Discover);
-                self.transfer = None;
-                Err(Error::IgnoreNoLog("PXE Done".to_string()))
             }
         }
     }
@@ -489,7 +490,7 @@ impl PxeSocket {
         match (*wrapper.borrow_repr(), &mut self.transfer) {
             (Repr::Ack { block_num }, Some(t)) => {
                 // Read file in chunks of blksize into buffer s
-                let packet = t.send_data(block_num).unwrap();
+                let packet = t.send_data(block_num)?;
                 Ok(packet)
             }
             (Repr::Error { code, msg }, None | Some(_)) => {

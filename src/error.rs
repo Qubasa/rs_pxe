@@ -24,6 +24,12 @@ pub enum Error {
     #[error("Invalid Packet: {0}")]
     Malformed(String),
 
+    #[error("Max retries exceeded")]
+    MaxRetriesExceeded,
+
+    #[error("Kill current tftp connection")]
+    StopTftpConnection(Vec<u8>),
+
     #[error("Ignore")]
     Ignore(String),
 

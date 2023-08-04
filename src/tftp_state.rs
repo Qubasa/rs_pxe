@@ -4,7 +4,7 @@ use smoltcp::{
     wire::{ArpRepr, EthernetAddress, Ipv4Address},
 };
 
-use crate::{prelude::*, utils};
+use crate::{prelude::*, utils, TftpError};
 use smolapps::wire::tftp::Repr;
 use smolapps::wire::tftp::{self, TftpOption};
 use std::{collections::BTreeMap, io::Seek};
@@ -148,7 +148,7 @@ pub struct Transfer<H> {
     pub handle: H,
     pub connection: TftpConnection,
     pub is_write: bool,
-    pub block_num: u16,
+    pub last_block_num: u16,
     pub options: TftpOptions,
     pub retries: u8,
     pub timeout: Instant,
@@ -166,20 +166,76 @@ where
             is_write,
             retries: 0,
             timeout: Instant::now() + Duration::from_millis(200),
-            block_num: 0,
+            last_block_num: 0,
         }
+    }
+
+    pub fn process_timeout(&mut self) -> Result<Vec<u8>> {
+        if self.retries >= 10 {
+            return Err(Error::MaxRetriesExceeded);
+        }
+
+        if self.timeout <= Instant::now() {
+            info!(
+                "Timeout detected. Resending last data packet. Attempt: {}",
+                self.retries
+            );
+            self.retries += 1;
+            self.reset_timeout();
+            return self.resend_last_data();
+        }
+        Err(Error::IgnoreNoLog("".to_string()))
     }
 
     pub fn reset_timeout(&mut self) {
         self.timeout = Instant::now() + Duration::from_millis(200);
     }
 
+    pub fn resend_last_data(&mut self) -> Result<Vec<u8>> {
+        // Read file in chunks of blksize into buffer s
+        let blksize = self.options.get(TftpOptionEnum::Blksize).unwrap();
+        let mut s = vec![0u8; blksize];
+        let bytes_read = match self.handle.repeat_last_read(s.as_mut_slice()) {
+            Ok(len) => len,
+            Err(e) => {
+                return Err(Error::Tftp(f!("tftp: error reading file: {}", e)));
+            }
+        };
+        if bytes_read == 0 {
+            log::info!("End of file reached");
+            return Err(Error::TftpEndOfFile);
+        }
+
+        let data = Repr::Data {
+            block_num: self.last_block_num,
+            data: &s.as_slice()[..bytes_read],
+        };
+        log::debug!(
+            "Sending data block {} of size {}",
+            self.last_block_num,
+            bytes_read
+        );
+
+        let packet = crate::utils::tftp_to_ether_unicast(&data, &self.connection);
+        Ok(packet)
+    }
+
+    pub fn send_timeout(&mut self) -> Result<Vec<u8>> {
+        let err = Repr::Error {
+            code: tftp::ErrorCode::Unknown(0),
+            msg: "Connection timed out",
+        };
+
+        let packet = crate::utils::tftp_to_ether_unicast(&err, &self.connection);
+        Ok(packet)
+    }
+
     pub fn send_data(&mut self, ack_block_num: u16) -> Result<Vec<u8>> {
-        if ack_block_num != self.block_num {
+        if ack_block_num != self.last_block_num {
             return Err(Error::Tftp(f!(
                 "tftp: received ack for block {} but expected {}",
                 ack_block_num,
-                self.block_num
+                self.last_block_num
             )));
         }
 
@@ -201,13 +257,13 @@ where
         }
 
         let data = Repr::Data {
-            block_num: self.block_num + 1,
+            block_num: self.last_block_num + 1,
             data: &s.as_slice()[..bytes_read],
         };
-        self.block_num += 1;
+        self.last_block_num += 1;
         log::debug!(
             "Sending data block {} of size {}",
-            self.block_num,
+            self.last_block_num,
             bytes_read
         );
 
