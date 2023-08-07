@@ -1,10 +1,8 @@
 #![allow(dead_code)]
 #![allow(unused_imports)]
 
-pub mod construct;
-pub mod dhcp_options;
+pub mod dhcp;
 pub mod error;
-pub mod parse;
 pub mod prelude;
 
 pub mod tftp;
@@ -309,7 +307,7 @@ impl PxeSocket {
                 */
                 let info = {
                     let dhcp = crate::utils::broadcast_ether_to_dhcp(rx_buffer)?;
-                    let info = crate::parse::pxe_discover(dhcp)?;
+                    let info = crate::dhcp::parse::pxe_discover(dhcp)?;
 
                     if info.msg_type != DhcpMessageType::Discover {
                         Err(Error::Ignore("Not a dhcp discover packet".to_string()))
@@ -328,7 +326,8 @@ impl PxeSocket {
                 address field is null (0.0.0.0). If this is a DHCP Service, then the returned client IP address
                 field is valid.
                 */
-                let dhcp_repr = construct::pxe_offer(&info, &self.server_ip, &self.stage_one_name);
+                let dhcp_repr =
+                    dhcp::construct::pxe_offer(&info, &self.server_ip, &self.stage_one_name);
                 let packet = utils::dhcp_to_ether_brdcast(
                     dhcp_repr.borrow_repr(),
                     &self.server_ip,
@@ -350,10 +349,10 @@ impl PxeSocket {
                 simply use the address.
                 */
                 match info.firmware_type {
-                    parse::FirmwareType::Uknown => {
+                    dhcp::parse::FirmwareType::Uknown => {
                         self.set_state(PxeStates::Request(info.transaction_id));
                     }
-                    parse::FirmwareType::IPxe => {
+                    dhcp::parse::FirmwareType::IPxe => {
                         info!("iPXE firmware detected. Jumping to TFTP phase");
                         self.is_stage_two = true;
                         self.set_state(PxeStates::Tftp(TftpStates::Tsize));
@@ -384,7 +383,7 @@ impl PxeSocket {
                         &self.server_ip,
                     )?;
 
-                    let info = crate::parse::pxe_discover(dhcp)?;
+                    let info = dhcp::parse::pxe_discover(dhcp)?;
 
                     if info.msg_type != DhcpMessageType::Request {
                         return Err(Error::Ignore("Not a dhcp request packet".to_string()));
@@ -410,7 +409,7 @@ impl PxeSocket {
                 */
 
                 let dhcp_repr =
-                    construct::pxe_ack(&info, &self.tftp_endpoint, &self.stage_one_name);
+                    dhcp::construct::pxe_ack(&info, &self.tftp_endpoint, &self.stage_one_name);
                 let packet = utils::dhcp_to_ether_unicast(
                     dhcp_repr.borrow_repr(),
                     &ip,

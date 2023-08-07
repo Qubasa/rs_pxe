@@ -56,7 +56,7 @@ use uuid::Uuid;
 
 use rs_pxe::tftp;
 
-use crate::dhcp_options::*;
+use crate::dhcp::options::*;
 use prelude::*;
 use rs_pxe::*;
 

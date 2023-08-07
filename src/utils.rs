@@ -4,7 +4,7 @@
 use std::net::IpAddr;
 use std::os::fd::AsRawFd;
 
-use crate::parse::PxeClientInfo;
+use crate::dhcp::parse::PxeClientInfo;
 use crate::tftp;
 use crate::tftp::socket::Handle;
 use crate::tftp::socket::TftpConnection;

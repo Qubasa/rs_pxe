@@ -1,7 +1,7 @@
 #![allow(unused_imports)]
 
-use crate::dhcp_options::*;
-use crate::parse::PxeClientInfo;
+use crate::dhcp::options::*;
+use crate::dhcp::parse::PxeClientInfo;
 use crate::prelude::*;
 
 use crate::tftp::socket;
@@ -26,7 +26,7 @@ use smoltcp::wire::EthernetAddress;
 use smoltcp::wire::EthernetFrame;
 use smoltcp::wire::HardwareAddress;
 
-use crate::dhcp_options::DhcpOptionWrapper;
+use crate::dhcp::options::DhcpOptionWrapper;
 use ouroboros::self_referencing;
 use rand::prelude::*;
 use smoltcp::wire::IpAddress;

@@ -3,7 +3,7 @@ use log::*;
 use smoltcp::wire::DhcpMessageType;
 use smoltcp::wire::DhcpPacket;
 
-use crate::dhcp_options::*;
+use crate::dhcp::options::*;
 use crate::prelude::*;
 
 use std::convert::TryFrom;
