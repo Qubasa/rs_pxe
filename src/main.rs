@@ -8,12 +8,12 @@ mod cli_opts;
 mod utils;
 
 use log::*;
-use rs_pxe::tftp_state::Handle;
-use rs_pxe::tftp_state::TestTftp;
-use rs_pxe::tftp_state::TftpConnection;
-use rs_pxe::tftp_state::Transfer;
-use smolapps::wire::tftp::TftpOption;
-use smolapps::wire::tftp::TftpOptsReader;
+use rs_pxe::tftp::parse::TftpOption;
+use rs_pxe::tftp::parse::TftpOptsReader;
+use rs_pxe::tftp::socket::Handle;
+use rs_pxe::tftp::socket::TestTftp;
+use rs_pxe::tftp::socket::TftpConnection;
+use rs_pxe::tftp::socket::Transfer;
 use smoltcp::iface::Config;
 use smoltcp::iface::Routes;
 use smoltcp::iface::SocketSet;
@@ -54,7 +54,7 @@ use std::os::unix::io::AsRawFd;
 use std::str::FromStr;
 use uuid::Uuid;
 
-use smolapps::wire::tftp;
+use rs_pxe::tftp;
 
 use crate::dhcp_options::*;
 use prelude::*;
@@ -239,40 +239,4 @@ fn main() {
         let brief = "Either --raw or --tun or --tap must be specified";
         panic!("{}", brief);
     };
-}
-
-#[cfg(test)]
-mod test {
-    use smoltcp::phy::Loopback;
-
-    use super::*;
-
-    fn create_ethernet() -> (Interface, Loopback) {
-        // Create a basic device
-        let mut device = Loopback::new(Medium::Ethernet);
-
-        let config = Config::new(HardwareAddress::Ethernet(EthernetAddress::default()));
-        let mut iface = Interface::new(config, &mut device);
-        iface.update_ip_addrs(|ip_addrs| {
-            ip_addrs
-                .push(IpCidr::new(IpAddress::v4(127, 0, 0, 1), 8))
-                .unwrap();
-            ip_addrs
-                .push(IpCidr::new(IpAddress::v6(0, 0, 0, 0, 0, 0, 0, 1), 128))
-                .unwrap();
-            ip_addrs
-                .push(IpCidr::new(IpAddress::v6(0xfdbe, 0, 0, 0, 0, 0, 0, 1), 64))
-                .unwrap();
-        });
-
-        (iface, device)
-    }
-
-    #[test]
-    pub fn test_pxe() {
-        // let (mut iface, mut device) = create_ethernet();
-        // let mut testsocket = TestSocket::new(device, iface);
-
-        //server(&mut testsocket);
-    }
 }

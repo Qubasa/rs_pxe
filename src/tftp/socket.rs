@@ -4,9 +4,9 @@ use smoltcp::{
     wire::{ArpRepr, EthernetAddress, Ipv4Address},
 };
 
+use super::parse::Repr;
+use super::parse::{self, TftpOption};
 use crate::{prelude::*, utils, TftpError};
-use smolapps::wire::tftp::Repr;
-use smolapps::wire::tftp::{self, TftpOption};
 use std::{collections::BTreeMap, io::Seek};
 
 /// Maximum number of retransmissions attempted by the server before giving up.
@@ -28,7 +28,7 @@ pub struct TftpReprWrapper {
     mdata: Vec<u8>,
     #[borrows(mdata)]
     #[covariant]
-    pub repr: tftp::Repr<'this>,
+    pub repr: Repr<'this>,
 }
 
 #[derive(Debug)]
@@ -222,7 +222,7 @@ where
 
     pub fn send_timeout(&mut self) -> Result<Vec<u8>> {
         let err = Repr::Error {
-            code: tftp::ErrorCode::Unknown(0),
+            code: parse::ErrorCode::Unknown(0),
             msg: "Connection timed out",
         };
 
@@ -278,7 +278,7 @@ where
         });
 
         let mut resp_opt_buf = vec![0u8; needed_bytes];
-        let mut opt_resp = tftp::TftpOptsWriter::new(resp_opt_buf.as_mut_slice());
+        let mut opt_resp = parse::TftpOptsWriter::new(resp_opt_buf.as_mut_slice());
 
         for (name, value) in ack_opts {
             let opt = TftpOption {
@@ -287,13 +287,13 @@ where
             };
             opt_resp.emit(opt).unwrap();
         }
-        let written_bytes = opt_resp.len();
+        let written_bytes = opt_resp.written_bytes();
         debug!(
             "Written bytes: {} needed_bytes: {}",
             written_bytes, needed_bytes
         );
         debug_assert!(written_bytes == needed_bytes);
-        let opts = tftp::TftpOptsReader::new(&resp_opt_buf[..written_bytes]);
+        let opts = parse::TftpOptsReader::new(&resp_opt_buf[..written_bytes]);
 
         let ack = Repr::OptionAck { opts };
         let packet = crate::utils::tftp_to_ether_unicast(&ack, &self.connection);

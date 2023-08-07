@@ -283,12 +283,6 @@ dependencies = [
 
 [[package]]
 name = "managed"
-version = "0.7.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c75de51135344a4f8ed3cfe2720dc27736f7711989703a0b43aadf3753c55577"
-
-[[package]]
-name = "managed"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ca88d725a0a943b096803bd34e73a4437208b6077654cc4ecb2947a5f91618d"
@@ -500,6 +494,7 @@ checksum = "436b050e76ed2903236f032a59761c1eb99e1b0aead2c257922771dab1fc8c78"
 name = "rs_pxe"
 version = "0.1.0"
 dependencies = [
+ "byteorder",
  "env_logger",
  "getopts",
  "local-ip-address",
@@ -509,8 +504,7 @@ dependencies = [
  "ouroboros",
  "pcap-file",
  "rand",
- "smolapps",
- "smoltcp 0.9.1",
+ "smoltcp",
  "thiserror",
  "uuid",
 ]
@@ -570,16 +564,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "smolapps"
-version = "0.1.4"
-dependencies = [
- "byteorder",
- "log",
- "managed 0.7.2",
- "smoltcp 0.9.1 (git+https://github.com/Luis-Hebendanz/smoltcp.git?branch=pxe_2)",
-]
-
-[[package]]
 name = "smoltcp"
 version = "0.9.1"
 dependencies = [
@@ -590,22 +574,7 @@ dependencies = [
  "heapless",
  "libc",
  "log",
- "managed 0.8.0",
-]
-
-[[package]]
-name = "smoltcp"
-version = "0.9.1"
-source = "git+https://github.com/Luis-Hebendanz/smoltcp.git?branch=pxe_2#af017d08290e06647099bdd51d60c102bf18280a"
-dependencies = [
- "bitflags 1.3.2",
- "byteorder",
- "cfg-if",
- "defmt",
- "heapless",
- "libc",
- "log",
- "managed 0.8.0",
+ "managed",
 ]
 
 [[package]]

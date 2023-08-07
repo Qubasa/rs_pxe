@@ -7,7 +7,7 @@ pub mod error;
 pub mod parse;
 pub mod prelude;
 
-pub mod tftp_state;
+pub mod tftp;
 pub mod udp_port_check;
 mod utils;
 
@@ -15,21 +15,22 @@ mod utils;
 mod tests;
 
 use prelude::*;
-use smolapps::wire::tftp::Repr;
 use smoltcp::wire::ArpRepr;
-use tftp_state::TftpOptionEnum;
+use tftp::parse::Repr;
+use tftp::socket::TftpOptionEnum;
 
-use crate::tftp_state::Handle;
-use crate::tftp_state::TestTftp;
-use crate::tftp_state::TftpConnection;
-use crate::tftp_state::Transfer;
 use log::*;
+use tftp::socket::Handle;
+use tftp::socket::TestTftp;
+use tftp::socket::TftpConnection;
+use tftp::socket::Transfer;
 
 use core::panic;
 use ouroboros::self_referencing;
 use rand::prelude::*;
-use smolapps::wire::tftp::TftpOption;
-use smolapps::wire::tftp::TftpOptsReader;
+use tftp::parse::TftpOption;
+use tftp::parse::TftpOptsReader;
+
 use smoltcp::iface::Config;
 use smoltcp::iface::Routes;
 use smoltcp::iface::SocketSet;
@@ -71,8 +72,6 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use uuid::Uuid;
 
-use smolapps::wire::tftp;
-
 #[self_referencing]
 #[derive(Debug)]
 pub struct TftpPacketWrapper {
@@ -81,11 +80,11 @@ pub struct TftpPacketWrapper {
 
     #[borrows(data)]
     #[covariant]
-    pub packet: tftp::Packet<&'this [u8]>,
+    pub packet: tftp::parse::Packet<&'this [u8]>,
 
     #[borrows(packet)]
     #[covariant]
-    pub repr: tftp::Repr<'this>,
+    pub repr: tftp::parse::Repr<'this>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -550,7 +549,7 @@ impl PxeSocket {
                     },
                     None,
                 ) => {
-                    if mode != tftp::Mode::Octet {
+                    if mode != tftp::parse::Mode::Octet {
                         return Err(Error::Tftp("Only octet mode is supported".to_string()));
                     }
 
@@ -618,16 +617,16 @@ impl PxeSocket {
         let (udp, src_endpoint, src_mac_addr) =
             crate::utils::unicast_ether_to_udp(rx_buffer, &self.server_mac, &self.server_ip)?;
 
-        let tftp_packet = match tftp::Packet::new_checked(udp.payload()) {
+        let tftp_packet = match tftp::parse::Packet::new_checked(udp.payload()) {
             Ok(packet) => packet,
             Err(e) => {
                 return Err(Error::Malformed(f!("tftp: invalid packet: {}", e)));
             }
         };
 
-        let is_write = tftp_packet.opcode() == tftp::OpCode::Write;
+        let is_write = tftp_packet.opcode() == tftp::parse::OpCode::Write;
 
-        match tftp::Repr::parse(&tftp_packet) {
+        match tftp::parse::Repr::parse(&tftp_packet) {
             Ok(repr) => repr,
             Err(e) => {
                 return Err(Error::Malformed(f!("tftp: invalid packet: {}", e)));
@@ -646,8 +645,8 @@ impl PxeSocket {
         let wrapper = TftpPacketWrapperBuilder {
             data: udp.payload().to_vec(),
             is_write,
-            packet_builder: |data| tftp::Packet::new_checked(data.as_ref()).unwrap(),
-            repr_builder: |packet| tftp::Repr::parse(packet).unwrap(),
+            packet_builder: |data| tftp::parse::Packet::new_checked(data.as_ref()).unwrap(),
+            repr_builder: |packet| tftp::parse::Repr::parse(packet).unwrap(),
         }
         .build();
 

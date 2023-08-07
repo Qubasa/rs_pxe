@@ -5,10 +5,12 @@ use std::net::IpAddr;
 use std::os::fd::AsRawFd;
 
 use crate::parse::PxeClientInfo;
-use crate::tftp_state::Handle;
-use crate::tftp_state::TftpConnection;
+use crate::tftp;
+use crate::tftp::socket::Handle;
+use crate::tftp::socket::TftpConnection;
+
 use ouroboros::self_referencing;
-use smolapps::wire::tftp;
+
 use smoltcp::iface::Interface;
 use smoltcp::iface::SocketSet;
 use smoltcp::phy::Checksum;
@@ -313,7 +315,10 @@ pub fn dhcp_to_ether_unicast<'a>(
     buffer
 }
 
-pub fn tftp_to_ether_unicast<'a>(tftp: &'a tftp::Repr<'a>, con: &'a TftpConnection) -> Vec<u8> {
+pub fn tftp_to_ether_unicast<'a>(
+    tftp: &'a tftp::parse::Repr<'a>,
+    con: &'a TftpConnection,
+) -> Vec<u8> {
     let mut checksum = ChecksumCapabilities::ignored();
     checksum.ipv4 = Checksum::Both;
     checksum.udp = Checksum::Both;
@@ -364,7 +369,7 @@ pub fn tftp_to_ether_unicast<'a>(tftp: &'a tftp::Repr<'a>, con: &'a TftpConnecti
         &ip_packet.dst_addr.into_address(),
         tftp.buffer_len(),
         |buf| {
-            let mut packet = tftp::Packet::new_unchecked(buf);
+            let mut packet = tftp::parse::Packet::new_unchecked(buf);
             tftp.emit(&mut packet).unwrap();
         },
         &checksum,
