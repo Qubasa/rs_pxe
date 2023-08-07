@@ -10,6 +10,10 @@ pub mod prelude;
 pub mod tftp_state;
 pub mod udp_port_check;
 mod utils;
+
+#[cfg(test)]
+mod tests;
+
 use prelude::*;
 use smolapps::wire::tftp::Repr;
 use smoltcp::wire::ArpRepr;
