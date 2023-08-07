@@ -144,7 +144,8 @@ pub fn intel_pxe() {
     let server_ip = Ipv4Address::new(192, 168, 178, 97);
     let server_mac = EthernetAddress::from_bytes(&[0x98, 0xfa, 0x9b, 0x4b, 0xb2, 0xc4]);
     let pxe_image = std::path::PathBuf::from_str("./assets/ipxe.pxe").unwrap();
-    let mut pxe_socket = PxeSocket::new(server_ip, server_mac, &pxe_image);
+    let kernel_image = std::path::PathBuf::from_str("./assets/kernel.elf").unwrap();
+    let mut pxe_socket = PxeSocket::new(server_ip, server_mac, &pxe_image, &kernel_image);
 
     // Emulate the DHCP Discover phase
     let res = cmp_impl_responses(
@@ -170,7 +171,8 @@ pub fn ipxe() {
     let server_ip = Ipv4Address::new(192, 168, 178, 97);
     let server_mac = EthernetAddress::from_bytes(&[0x98, 0xfa, 0x9b, 0x4b, 0xb2, 0xc4]);
     let pxe_image = std::path::PathBuf::from_str("./assets/ipxe.pxe").unwrap();
-    let mut pxe_socket = PxeSocket::new(server_ip, server_mac, &pxe_image);
+    let kernel_image = std::path::PathBuf::from_str("./assets/kernel.elf").unwrap();
+    let mut pxe_socket = PxeSocket::new(server_ip, server_mac, &pxe_image, &kernel_image);
 
     // Emulate the DHCP Discover phase
     let res = cmp_impl_responses(

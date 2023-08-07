@@ -105,7 +105,7 @@ pkill rs_pxe || true
 rm -f ./target/debug/rs_pxe
 cargo build
 sudo setcap cap_net_admin,cap_net_raw=eip ./target/debug/rs_pxe
-./target/debug/rs_pxe -l DEBUG --ipxe ./assets/ipxe.pxe --raw -i $LAN &
+./target/debug/rs_pxe -l DEBUG --ipxe ./assets/ipxe.pxe --kernel ./assets/kernel.elf --raw -i $LAN &
 
 # IPXE Boot Emulation
 if $ipxe; then

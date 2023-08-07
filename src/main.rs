@@ -81,6 +81,16 @@ fn main() {
         }
     };
 
+    let kernel_image = match matches.opt_str("kernel") {
+        Some(image) => std::path::PathBuf::from_str(&image).expect("Invalid path to kernel image"),
+        None => {
+            let path = std::env::var("KERNEL_IMAGE")
+                .expect("KERNEL_IMAGE env var not set. Or use --kernel flag.");
+
+            std::path::PathBuf::from_str(&path).expect("Invalid path to kernel image")
+        }
+    };
+
     let level_filter = LevelFilter::from_str(&v).unwrap();
     cli_opts::setup_logging(level_filter);
     info!("Starting pxe....");
@@ -120,7 +130,7 @@ fn main() {
         };
         let server_ip: Ipv4Address = iface.ipv4_addr().unwrap();
 
-        let mut pxe_socket = PxeSocket::new(server_ip, server_mac, &pxe_image);
+        let mut pxe_socket = PxeSocket::new(server_ip, server_mac, &pxe_image, &kernel_image);
         let fd: i32 = device.as_raw_fd();
         let mut last_time: Instant = Instant::now();
 

@@ -186,6 +186,8 @@ pub struct PxeSocket {
     _state: PxeStates,
     stage_one: PathBuf,
     stage_one_name: String,
+    stage_two: PathBuf,
+    stage_two_name: String,
     is_stage_two: bool,
     transfer: Option<Transfer<TestTftp>>,
     tftp_con: Option<TftpConnection>,
@@ -203,6 +205,9 @@ impl PxeSocket {
     }
     pub fn get_state(&self) -> &PxeStates {
         &self._state
+    }
+    pub fn get_stage_two(&self) -> &PathBuf {
+        &self.stage_two
     }
     pub fn get_stage_one(&self) -> &PathBuf {
         &self.stage_one
@@ -232,7 +237,12 @@ impl PxeSocket {
         Err(Error::IgnoreNoLog("".to_string()))
     }
 
-    pub fn new(server_ip: Ipv4Address, server_mac: EthernetAddress, stage_one: &Path) -> Self {
+    pub fn new(
+        server_ip: Ipv4Address,
+        server_mac: EthernetAddress,
+        stage_one: &Path,
+        stage_two: &Path,
+    ) -> Self {
         log::info!(
             "Creating pxe socket with ip: {} and mac {}",
             server_ip,
@@ -261,6 +271,12 @@ impl PxeSocket {
             panic!("Stage one file name is too long");
         }
 
+        let stage_two_name = stage_two.file_name().unwrap().to_str().unwrap().to_string();
+
+        if stage_two_name.len() > 127 {
+            panic!("Stage two file name is too long");
+        }
+
         Self {
             _state: state,
             is_stage_two: false,
@@ -269,6 +285,8 @@ impl PxeSocket {
             server_mac,
             server_ip,
             tftp_endpoint,
+            stage_two: stage_two.to_path_buf(),
+            stage_two_name,
             stage_one: stage_one.to_path_buf(),
             stage_one_name,
         }
@@ -334,6 +352,7 @@ impl PxeSocket {
                     }
                     parse::FirmwareType::IPxe => {
                         info!("iPXE firmware detected. Jumping to TFTP phase");
+                        self.is_stage_two = true;
                         self.set_state(PxeStates::Tftp(TftpStates::Tsize));
                     }
                 }
@@ -480,6 +499,7 @@ impl PxeSocket {
                         Ok(packet) => Ok(packet),
                         Err(Error::TftpEndOfFile) => {
                             self.transfer = None;
+                            self.is_stage_two = false;
                             self.set_state(PxeStates::Discover);
                             Err(Error::IgnoreNoLog("End of file reached".to_string()))
                         }
@@ -531,7 +551,13 @@ impl PxeSocket {
                     }
 
                     let mut t = {
-                        let file = File::open(self.get_stage_one())?;
+                        let file = {
+                            if self.is_stage_two {
+                                File::open(self.get_stage_two())?
+                            } else {
+                                File::open(self.get_stage_one())?
+                            }
+                        };
                         let xfer_idx = TestTftp::new(file);
 
                         Transfer::new(xfer_idx, tftp_con, *wrapper.borrow_is_write())
