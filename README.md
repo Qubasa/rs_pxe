@@ -16,9 +16,15 @@ sudo setcap cap_net_admin,cap_net_raw=eip ./target/release/rs_pxe
 ```
 
 ## Install Dependencies
+
+This project uses the [Nix package manager](https://nixos.org/download.html).
+
+If you do not want to install it you can use the 
+[nix-portable](https://github.com/DavHau/nix-portable/releases) binary instead.
+
 To drop into the development environment just execute:
 ```bash
-./assets/nix-portable nix develop
+~/Downloads/nix-portable nix develop
 ```
 
 OR
@@ -29,6 +35,8 @@ sh <(curl -L https://nixos.org/nix/install) --daemon --yes --nix-extra-conf-file
 ```
 
 ## Development Environment
+
+The command below will spawn a bash shell with all needed dependencies.
 ```bash
 nix develop
 ```
