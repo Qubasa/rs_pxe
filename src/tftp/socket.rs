@@ -217,8 +217,9 @@ impl TftpSocket {
                             self.file_path.display()
                         );
                         let file = File::open(&self.file_path)?;
+                        let file_len = file.metadata()?.len();
                         let xfer_idx = TestTftp::new(file);
-
+                        log::debug!("Opened file size: {}", file_len);
                         Transfer::new(xfer_idx, tftp_con, *wrapper.borrow_is_write())
                     };
 
@@ -241,6 +242,7 @@ impl TftpSocket {
                             }
                             "tsize" => {
                                 let tsize = t.handle.file.metadata()?.len();
+                                log::debug!("tftp: tsize: {}", tsize);
                                 t.options.add(TftpOptionEnum::Tsize, tsize as usize);
                             }
                             _ => warn!("Unhandled tftp option: {}={}", name, value),

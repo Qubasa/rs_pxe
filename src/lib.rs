@@ -122,7 +122,7 @@ impl PxeSocket {
     fn reset_state(&mut self) {
         self.tftp_socket = None;
         self.dhcp_socket =
-            dhcp::socket::DhcpSocket::new(self.server_ip, self.server_mac, &self.get_stage_one());
+            dhcp::socket::DhcpSocket::new(self.server_ip, self.server_mac, self.get_stage_one());
         self.set_state(PxeStates::Dhcp);
     }
 

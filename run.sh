@@ -3,7 +3,7 @@
 set -euo pipefail
 
 
-LAN=enp2s0
+LAN=false
 BRIDGE=kmania_br0
 QEMU_IF=qemu_tap
 RUST_IF=rust_tap
@@ -26,12 +26,23 @@ while [[ $# -gt 0 ]]; do
       --none) # Set ipxe to true if --ipxe is present
       none=true
       ;;
+    -i|--interface) # Set the interface name
+      LAN=$2
+      echo "Using interface $LAN"
+      shift
+      ;;
     *) # Ignore other arguments
       ;;
   esac
   # Shift to the next argument
   shift
 done
+
+if [[ $LAN == false ]]; then
+  echo "Usage: $0 [--uefi_pxe] [--ipxe] [--none] -i <interface>"
+  echo "The interface must be specified."
+  exit 1
+fi
 
 # Check if both arguments are false
 if [[ $uefi_pxe == false && $ipxe == false && $none == false ]]; then
