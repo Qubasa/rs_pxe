@@ -6,8 +6,8 @@ use std::os::fd::AsRawFd;
 
 use crate::dhcp::parse::PxeClientInfo;
 use crate::tftp;
-use crate::tftp::socket::Handle;
-use crate::tftp::socket::TftpConnection;
+use crate::tftp::construct::Handle;
+use crate::tftp::construct::TftpConnection;
 
 use ouroboros::self_referencing;
 

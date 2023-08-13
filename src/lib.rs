@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 #![allow(unused_imports)]
 
 pub mod dhcp;
@@ -14,14 +13,16 @@ mod tests;
 
 use prelude::*;
 use smoltcp::wire::ArpRepr;
+use tftp::construct::TftpError;
+use tftp::construct::TftpOptionEnum;
 use tftp::parse::Repr;
-use tftp::socket::TftpOptionEnum;
+use tftp::socket::{TftpPacketWrapper, TftpPacketWrapperBuilder, TftpSocket};
 
 use log::*;
-use tftp::socket::Handle;
-use tftp::socket::TestTftp;
-use tftp::socket::TftpConnection;
-use tftp::socket::Transfer;
+use tftp::construct::Handle;
+use tftp::construct::TestTftp;
+use tftp::construct::TftpConnection;
+use tftp::construct::Transfer;
 
 use core::panic;
 use ouroboros::self_referencing;
@@ -70,84 +71,13 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use uuid::Uuid;
 
-#[self_referencing]
-#[derive(Debug)]
-pub struct TftpPacketWrapper {
-    pub data: Vec<u8>,
-    pub is_write: bool,
-
-    #[borrows(data)]
-    #[covariant]
-    pub packet: tftp::parse::Packet<&'this [u8]>,
-
-    #[borrows(packet)]
-    #[covariant]
-    pub repr: tftp::parse::Repr<'this>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum TftpError {
-    Unknown,
-    FileNotFound,
-    AccessViolation,
-    DiskFull,
-    IllegalOperation,
-    UnknownTransferId,
-    FileAlreadyExists,
-    NoSuchUser,
-}
-
-impl Display for TftpError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            TftpError::Unknown => write!(f, "Unknown"),
-            TftpError::FileNotFound => write!(f, "FileNotFound"),
-            TftpError::AccessViolation => write!(f, "AccessViolation"),
-            TftpError::DiskFull => write!(f, "DiskFull"),
-            TftpError::IllegalOperation => write!(f, "IllegalOperation"),
-            TftpError::UnknownTransferId => write!(f, "UnknownTransferId"),
-            TftpError::FileAlreadyExists => write!(f, "FileAlreadyExists"),
-            TftpError::NoSuchUser => write!(f, "NoSuchUser"),
-        }
-    }
-}
-
-impl From<TftpError> for u16 {
-    fn from(e: TftpError) -> Self {
-        match e {
-            TftpError::Unknown => 0,
-            TftpError::FileNotFound => 1,
-            TftpError::AccessViolation => 2,
-            TftpError::DiskFull => 3,
-            TftpError::IllegalOperation => 4,
-            TftpError::UnknownTransferId => 5,
-            TftpError::FileAlreadyExists => 6,
-            TftpError::NoSuchUser => 7,
-        }
-    }
-}
-impl From<u16> for TftpError {
-    fn from(e: u16) -> Self {
-        match e {
-            0 => TftpError::Unknown,
-            1 => TftpError::FileNotFound,
-            2 => TftpError::AccessViolation,
-            3 => TftpError::DiskFull,
-            4 => TftpError::IllegalOperation,
-            5 => TftpError::UnknownTransferId,
-            6 => TftpError::FileAlreadyExists,
-            7 => TftpError::NoSuchUser,
-            _ => TftpError::Unknown,
-        }
-    }
-}
+use crate::tftp::socket::TftpStates;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum PxeStates {
     Discover,
     Request(u32),
-    ArpRequest,
-    Tftp(TftpStates),
+    Tftp,
 }
 
 impl Display for PxeStates {
@@ -157,27 +87,7 @@ impl Display for PxeStates {
             PxeStates::Request(transaction_id) => {
                 write!(f, "Request {{ transaction_id: {:#x} }}", transaction_id)
             }
-            PxeStates::ArpRequest => write!(f, "ArpRequest"),
-            PxeStates::Tftp(tftp_state) => write!(f, "Tftp({})", tftp_state),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum TftpStates {
-    Tsize,
-    BlkSize,
-    Data,
-    Error,
-}
-
-impl Display for TftpStates {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            TftpStates::Tsize => write!(f, "Tsize"),
-            TftpStates::BlkSize => write!(f, "BlkSize"),
-            TftpStates::Data => write!(f, "Data"),
-            TftpStates::Error => write!(f, "Error"),
+            PxeStates::Tftp => write!(f, "Tftp"),
         }
     }
 }
@@ -190,11 +100,10 @@ pub struct PxeSocket {
     stage_two: PathBuf,
     stage_two_name: String,
     is_stage_two: bool,
-    transfer: Option<Transfer<TestTftp>>,
-    tftp_con: Option<TftpConnection>,
     server_mac: EthernetAddress,
     server_ip: Ipv4Address,
-    tftp_endpoint: IpListenEndpoint,
+    free_port: IpListenEndpoint,
+    tftp_socket: Option<TftpSocket>,
 }
 
 impl PxeSocket {
@@ -217,25 +126,12 @@ impl PxeSocket {
         debug!("Changing state to {}", state);
         self._state = state;
     }
-    pub fn reset_transfer(&mut self) {
-        self.transfer = None;
-        self.set_state(PxeStates::Tftp(TftpStates::Tsize));
-    }
 
     pub fn process_timeout(&mut self) -> Result<Vec<u8>> {
-        if let Some(trans) = &mut self.transfer {
-            return match trans.process_timeout() {
-                Ok(packet) => Ok(packet),
-                Err(Error::MaxRetriesExceeded) => {
-                    error!("Killing connection. Sending timeout");
-                    let packet = trans.send_timeout().unwrap();
-                    Err(Error::StopTftpConnection(packet))
-                }
-                Err(Error::Ignore(_) | Error::IgnoreNoLog(_)) => Err(Error::Ignore("".to_string())),
-                Err(e) => panic!("Error: {}", e),
-            };
+        if let Some(tftp_socket) = &mut self.tftp_socket {
+            return tftp_socket.process_timeout();
         }
-        Err(Error::IgnoreNoLog("".to_string()))
+        Err(Error::IgnoreNoLog("Nothing todo".to_string()))
     }
 
     pub fn new(
@@ -251,7 +147,7 @@ impl PxeSocket {
         );
 
         // Find free tftp port in userspace range
-        let tftp_endpoint = {
+        let free_port = {
             let free_port = crate::udp_port_check::free_local_port_in_range(32768, 60999)
                 .expect("No free UDP port found");
 
@@ -280,12 +176,11 @@ impl PxeSocket {
 
         Self {
             _state: state,
+            tftp_socket: None,
             is_stage_two: false,
-            transfer: None,
-            tftp_con: None,
             server_mac,
             server_ip,
-            tftp_endpoint,
+            free_port,
             stage_two: stage_two.to_path_buf(),
             stage_two_name,
             stage_one: stage_one.to_path_buf(),
@@ -355,7 +250,7 @@ impl PxeSocket {
                     dhcp::parse::FirmwareType::IPxe => {
                         info!("iPXE firmware detected. Jumping to TFTP phase");
                         self.is_stage_two = true;
-                        self.set_state(PxeStates::Tftp(TftpStates::Tsize));
+                        self.set_state(PxeStates::Tftp);
                     }
                 }
 
@@ -409,7 +304,7 @@ impl PxeSocket {
                 */
 
                 let dhcp_repr =
-                    dhcp::construct::pxe_ack(&info, &self.tftp_endpoint, &self.stage_one_name);
+                    dhcp::construct::pxe_ack(&info, &self.free_port, &self.stage_one_name);
                 let packet = utils::dhcp_to_ether_unicast(
                     dhcp_repr.borrow_repr(),
                     &ip,
@@ -426,270 +321,32 @@ impl PxeSocket {
                 downloaded code in memory is dependent on the client’s CPU architecture.
                 */
 
-                self.set_state(PxeStates::Tftp(TftpStates::Tsize));
+                self.set_state(PxeStates::Tftp);
 
                 Ok(packet)
             }
-            PxeStates::ArpRequest => {
-                let packet = self.arp_respond(rx_buffer)?;
-                self.set_state(PxeStates::Tftp(TftpStates::Tsize));
 
-                Ok(packet)
-            }
-            PxeStates::Tftp(ref tftp_state) => {
-                let (tftp_con, wrapper) = self.recv_tftp(rx_buffer)?;
-
-                match tftp_state {
-                    TftpStates::Tsize => {
-                        let trans = self.parse_ack_options(&wrapper, tftp_con).unwrap();
-
-                        // If both tsize and blksize are present, we can go straight to data state
-                        if trans.options.has(TftpOptionEnum::Tsize)
-                            && trans.options.has(TftpOptionEnum::Blksize)
-                        {
-                            self.set_state(PxeStates::Tftp(TftpStates::Data));
-
-                        // If only tsize is present, we need to request blksize
-                        } else if trans.options.has(TftpOptionEnum::Tsize) {
-                            self.set_state(PxeStates::Tftp(TftpStates::BlkSize));
-
-                        // Else throw error
+            PxeStates::Tftp => {
+                if let None = self.tftp_socket {
+                    let tftp_socket = {
+                        if self.is_stage_two {
+                            TftpSocket::new(self.server_mac, self.server_ip, self.get_stage_two())
                         } else {
-                            return Err(Error::Tftp(f!(
-                                "Missing tsize option. Got options: {:?}",
-                                trans.options
-                            )));
+                            TftpSocket::new(self.server_mac, self.server_ip, self.get_stage_one())
                         }
-                        let packet = trans.ack_options().unwrap();
-                        self.transfer = Some(trans);
-                        Ok(packet)
-                    }
-                    TftpStates::BlkSize => {
-                        let trans = {
-                            match self.parse_ack_options(&wrapper, tftp_con) {
-                                Ok(ack_opts) => ack_opts,
-                                Err(e) => {
-                                    if let Error::TftpReceivedError(code, msg) = e {
-                                        if u16::from(code) == 0u16 {
-                                            // Reset transfer because we received an error
-                                            // This is expected and this is how the Intel firmware does
-                                            // multiple tftp options in separate packets. This is not spec
-                                            // compliant. Eyyy
-                                            self.transfer = None;
-                                            return Err(Error::IgnoreNoLog(msg));
-                                        } else {
-                                            panic!(
-                                                "Received unexpected tftp error: {}",
-                                                Error::TftpReceivedError(code, msg)
-                                            );
-                                            //return Err(Error::TftpReceivedError(code, msg));
-                                        }
-                                    } else {
-                                        panic!("Received unexpected tftp error: {}", e);
-                                        //return Err(e);
-                                    }
-                                }
-                            }
-                        };
-
-                        let packet = trans.ack_options().unwrap();
-                        self.transfer = Some(trans);
-                        self.set_state(PxeStates::Tftp(TftpStates::Data));
-                        Ok(packet)
-                    }
-                    TftpStates::Data => match self.reply_data(&wrapper) {
-                        Ok(packet) => Ok(packet),
-                        Err(Error::TftpEndOfFile) => {
-                            self.transfer = None;
-                            self.is_stage_two = false;
-                            self.set_state(PxeStates::Discover);
-                            Err(Error::IgnoreNoLog("End of file reached".to_string()))
-                        }
-                        Err(e) => panic!("Received unexpected tftp error: {}", e),
-                    },
-                    TftpStates::Error => todo!(),
-                }
-            }
-        }
-    }
-
-    pub fn reply_data(&mut self, wrapper: &TftpPacketWrapper) -> Result<Vec<u8>> {
-        match (*wrapper.borrow_repr(), &mut self.transfer) {
-            (Repr::Ack { block_num }, Some(t)) => {
-                // Read file in chunks of blksize into buffer s
-                let packet = t.send_data(block_num)?;
-                Ok(packet)
-            }
-            (Repr::Error { code, msg }, None | Some(_)) => {
-                let code: u16 = code.into();
-                let error = TftpError::from(code);
-                Err(Error::TftpReceivedError(error, msg.to_string()))
-            }
-            (packet, trans) => Err(Error::Tftp(f!(
-                "Received unexpected tftp packet: {:?}. transfer: {:?} ",
-                packet,
-                trans
-            ))),
-        }
-    }
-
-    pub fn parse_ack_options(
-        &self,
-        wrapper: &TftpPacketWrapper,
-        tftp_con: TftpConnection,
-    ) -> Result<Transfer<TestTftp>> {
-        {
-            match (*wrapper.borrow_repr(), &self.transfer) {
-                (
-                    Repr::ReadRequest {
-                        filename,
-                        mode,
-                        opts,
-                    },
-                    None,
-                ) => {
-                    if mode != tftp::parse::Mode::Octet {
-                        return Err(Error::Tftp("Only octet mode is supported".to_string()));
-                    }
-
-                    let mut t = {
-                        let file = {
-                            if self.is_stage_two {
-                                File::open(self.get_stage_two())?
-                            } else {
-                                File::open(self.get_stage_one())?
-                            }
-                        };
-                        let xfer_idx = TestTftp::new(file);
-
-                        Transfer::new(xfer_idx, tftp_con, *wrapper.borrow_is_write())
                     };
+                    self.tftp_socket = Some(tftp_socket);
+                }
 
-                    for opt in opts.options() {
-                        let (name, value) = (opt.name, opt.value);
-
-                        match name {
-                            "blksize" => {
-                                match value.parse::<usize>() {
-                                    Ok(blksize) => {
-                                        t.options.add(TftpOptionEnum::Blksize, blksize);
-                                    }
-                                    Err(_) => {
-                                        return Err(Error::Tftp(f!(
-                                            "tftp: blksize option should be a number is however {}",
-                                            value
-                                        )));
-                                    }
-                                };
-                            }
-                            "tsize" => {
-                                let tsize = t.handle.file.metadata()?.len();
-                                t.options.add(TftpOptionEnum::Tsize, tsize as usize);
-                            }
-                            _ => warn!("Unhandled tftp option: {}={}", name, value),
-                        }
+                match self.tftp_socket.as_mut().unwrap().process(rx_buffer) {
+                    Err(Error::TftpEndOfFile) => {
+                        self.set_state(PxeStates::Discover);
+                        Err(Error::TftpEndOfFile)
                     }
-
-                    log::debug!("tftp: request for file: {}", filename);
-                    log::debug!(
-                        "tftp: {} request from: {:?}",
-                        if t.is_write { "write" } else { "read" },
-                        t
-                    );
-                    Ok(t)
+                    Ok(packet) => Ok(packet),
+                    Err(e) => Err(e),
                 }
-                (Repr::Error { code, msg }, None | Some(_)) => {
-                    let code: u16 = code.into();
-                    let error = TftpError::from(code);
-                    Err(Error::TftpReceivedError(error, msg.to_string()))
-                }
-                (packet, trans) => Err(Error::Tftp(f!(
-                    "Received unexpected tftp packet: {:?}. Transfer: {:?} ",
-                    packet,
-                    trans
-                ))),
             }
-        }
-    }
-
-    pub fn recv_tftp(&self, rx_buffer: &[u8]) -> Result<(TftpConnection, TftpPacketWrapper)> {
-        let (udp, src_endpoint, src_mac_addr) =
-            crate::utils::unicast_ether_to_udp(rx_buffer, &self.server_mac, &self.server_ip)?;
-
-        let tftp_packet = match tftp::parse::Packet::new_checked(udp.payload()) {
-            Ok(packet) => packet,
-            Err(e) => {
-                return Err(Error::Malformed(f!("tftp: invalid packet: {}", e)));
-            }
-        };
-
-        let is_write = tftp_packet.opcode() == tftp::parse::OpCode::Write;
-
-        match tftp::parse::Repr::parse(&tftp_packet) {
-            Ok(repr) => repr,
-            Err(e) => {
-                return Err(Error::Malformed(f!("tftp: invalid packet: {}", e)));
-            }
-        };
-
-        let client = TftpConnection {
-            server_ip: self.server_ip,
-            server_mac: self.server_mac,
-            client_ip: Ipv4Address::from_bytes(src_endpoint.addr.as_bytes()),
-            client_mac: src_mac_addr,
-            server_port: udp.dst_port(),
-            client_port: udp.src_port(),
-        };
-
-        let wrapper = TftpPacketWrapperBuilder {
-            data: udp.payload().to_vec(),
-            is_write,
-            packet_builder: |data| tftp::parse::Packet::new_checked(data.as_ref()).unwrap(),
-            repr_builder: |packet| tftp::parse::Repr::parse(packet).unwrap(),
-        }
-        .build();
-
-        Ok((client, wrapper))
-    }
-
-    pub fn arp_respond(&self, rx_buffer: &[u8]) -> Result<Vec<u8>> {
-        let arp = utils::ether_to_arp(rx_buffer)?;
-
-        match arp {
-            ArpRepr::EthernetIpv4 {
-                operation,
-                target_protocol_addr,
-                target_hardware_addr: _,
-                source_hardware_addr,
-                source_protocol_addr,
-            } => {
-                if target_protocol_addr != self.server_ip {
-                    return Err(Error::Ignore(f!(
-                        "Ignoring arp packet with target ip: {}",
-                        target_protocol_addr
-                    )));
-                }
-
-                if operation != smoltcp::wire::ArpOperation::Request {
-                    return Err(Error::Ignore(f!(
-                        "Ignoring arp packet with operation: {:?}",
-                        operation
-                    )));
-                }
-
-                let arp = ArpRepr::EthernetIpv4 {
-                    operation: smoltcp::wire::ArpOperation::Reply,
-                    source_hardware_addr: self.server_mac,
-                    source_protocol_addr: self.server_ip,
-                    target_hardware_addr: source_hardware_addr,
-                    target_protocol_addr: source_protocol_addr,
-                };
-
-                let packet = utils::arp_reply(arp);
-
-                Ok(packet)
-            }
-            _ => todo!(),
         }
     }
 }

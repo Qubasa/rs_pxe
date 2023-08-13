@@ -4,7 +4,7 @@ use crate::dhcp::options::*;
 use crate::dhcp::parse::PxeClientInfo;
 use crate::prelude::*;
 
-use crate::tftp::socket;
+use crate::tftp::construct;
 use log::*;
 use smoltcp::iface::Config;
 use smoltcp::iface::Routes;

@@ -60,7 +60,7 @@ pub fn ipxe() {
     );
     verify_responses(&res);
 
-    assert_eq!(pxe_socket.get_state(), &PxeStates::Tftp(TftpStates::Tsize));
+    assert_eq!(pxe_socket.get_state(), &PxeStates::Tftp);
 
     let res = cmp_impl_responses(
         &mut pxe_socket,

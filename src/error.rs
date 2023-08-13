@@ -1,4 +1,4 @@
-use crate::TftpError;
+use crate::tftp::construct::TftpError;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {

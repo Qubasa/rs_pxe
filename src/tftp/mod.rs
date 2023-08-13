@@ -1,5 +1,7 @@
+pub mod construct;
 pub mod parse;
-pub mod socket;
 
 #[macro_use]
 pub mod macros;
+
+pub mod socket;

@@ -4,319 +4,301 @@ use smoltcp::{
     wire::{ArpRepr, EthernetAddress, Ipv4Address},
 };
 
-use super::parse::Repr;
-use super::parse::{self, TftpOption};
-use crate::{prelude::*, utils, TftpError};
-use std::{collections::BTreeMap, io::Seek};
-
-/// Maximum number of retransmissions attempted by the server before giving up.
-const MAX_RETRIES: u8 = 10;
-
-/// Interval between consecutive retries in case of no answer.
-const RETRY_TIMEOUT: Duration = Duration::from_millis(200);
-
-/// IANA port for TFTP servers.
-const TFTP_PORT: u16 = 69;
-
+use super::{construct::TftpConnection, parse::Repr};
+use super::{
+    construct::{TestTftp, TftpError, TftpOptionEnum, Transfer},
+    parse::{self, TftpOption},
+};
+use crate::{prelude::*, utils};
 use ouroboros::self_referencing;
+use std::{
+    collections::BTreeMap,
+    fmt::Display,
+    fs::File,
+    io::Seek,
+    path::{Path, PathBuf},
+};
 
-use std::{collections::HashMap, fmt::Display, fs::File, io::Read};
-
-#[self_referencing]
+#[self_referencing(pub_extras)]
 #[derive(Debug)]
-pub struct TftpReprWrapper {
-    mdata: Vec<u8>,
-    #[borrows(mdata)]
-    #[covariant]
-    pub repr: Repr<'this>,
-}
-
-#[derive(Debug)]
-pub struct TestTftp {
-    pub file: File,
-    last_read: usize,
-}
-
-impl TestTftp {
-    pub fn new(file: File) -> Self {
-        Self { file, last_read: 0 }
-    }
-}
-
-impl Handle for TestTftp {
-    fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
-        let read_bytes = self.file.read(buf)?;
-        self.last_read = read_bytes;
-        Ok(read_bytes)
-    }
-
-    fn write(&mut self, _buf: &[u8]) -> Result<usize> {
-        todo!()
-    }
-
-    fn repeat_last_read(&mut self, buf: &mut [u8]) -> Result<usize> {
-        if buf.len() != self.last_read {
-            return Err(Error::Generic(
-                "Buffer size does not match last read size".to_string(),
-            ));
-        }
-
-        self.file
-            .seek(std::io::SeekFrom::Current(-(self.last_read as i64)))?;
-
-        self.read(buf)
-    }
-}
-
-/// An open file handle returned by a [`Context::open()`] operation.
-///
-/// [`Context::open()`]: trait.Context.html#tymethod.open
-pub trait Handle {
-    /// Pulls some bytes from this handle into the specified buffer, returning how many bytes were read.
-    ///
-    /// `buf` is guaranteed to be exactly 512 bytes long, the maximum packet size allowed by the protocol.
-    fn read(&mut self, buf: &mut [u8]) -> Result<usize>;
-
-    fn repeat_last_read(&mut self, buf: &mut [u8]) -> Result<usize>;
-
-    /// Writes a buffer into this handle's buffer, returning how many bytes were written.
-    ///
-    /// `buf` can be anywhere from 0 to 512 bytes long.
-    fn write(&mut self, buf: &[u8]) -> Result<usize>;
-}
-
-#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]
-pub enum TftpOptionEnum {
-    Blksize,
-    Tsize,
-}
-
-impl From<&TftpOptionEnum> for &str {
-    fn from(opt: &TftpOptionEnum) -> Self {
-        match &opt {
-            TftpOptionEnum::Blksize => "blksize",
-            TftpOptionEnum::Tsize => "tsize",
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct TftpOptions {
-    opts: BTreeMap<TftpOptionEnum, usize>,
-}
-
-impl TftpOptions {
-    pub fn new() -> Self {
-        Self {
-            opts: BTreeMap::new(),
-        }
-    }
-
-    pub fn to_str_str(&self) -> BTreeMap<String, String> {
-        let mut map = BTreeMap::new();
-
-        for (k, v) in self.opts.iter() {
-            let k: &str = k.into();
-            map.insert(k.to_string(), v.to_string());
-        }
-
-        map
-    }
-
-    pub fn has(&self, option: TftpOptionEnum) -> bool {
-        self.opts.contains_key(&option)
-    }
-
-    pub fn add(&mut self, option: TftpOptionEnum, value: usize) {
-        self.opts.insert(option, value);
-    }
-
-    pub fn get(&self, option: TftpOptionEnum) -> Option<usize> {
-        self.opts.get(&option).copied()
-    }
-}
-
-impl Default for TftpOptions {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-/// An active TFTP transfer.
-#[derive(Debug, Clone)]
-pub struct Transfer<H> {
-    pub handle: H,
-    pub connection: TftpConnection,
+pub struct TftpPacketWrapper {
+    pub data: Vec<u8>,
     pub is_write: bool,
-    pub last_block_num: u16,
-    pub options: TftpOptions,
-    pub retries: u8,
-    pub timeout: Instant,
+
+    #[borrows(data)]
+    #[covariant]
+    pub packet: parse::Packet<&'this [u8]>,
+
+    #[borrows(packet)]
+    #[covariant]
+    pub repr: parse::Repr<'this>,
 }
 
-impl<H> Transfer<H>
-where
-    H: Handle,
-{
-    pub fn new(xfer_idx: H, connection: TftpConnection, is_write: bool) -> Self {
-        Self {
-            handle: xfer_idx,
-            connection,
-            options: TftpOptions::new(),
-            is_write,
-            retries: 0,
-            timeout: Instant::now() + Duration::from_millis(200),
-            last_block_num: 0,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum TftpStates {
+    Tsize,
+    BlkSize,
+    Data,
+    Error,
+}
+
+impl Display for TftpStates {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TftpStates::Tsize => write!(f, "Tsize"),
+            TftpStates::BlkSize => write!(f, "BlkSize"),
+            TftpStates::Data => write!(f, "Data"),
+            TftpStates::Error => write!(f, "Error"),
         }
+    }
+}
+
+#[derive(Debug)]
+pub struct TftpSocket {
+    _state: TftpStates,
+    server_mac: EthernetAddress,
+    server_ip: Ipv4Address,
+    file_path: PathBuf,
+    transfer: Option<Transfer<TestTftp>>,
+}
+
+impl TftpSocket {
+    pub fn new(server_mac: EthernetAddress, server_ip: Ipv4Address, file_path: &Path) -> Self {
+        Self {
+            _state: TftpStates::Tsize,
+            file_path: file_path.to_path_buf(),
+            server_mac,
+            server_ip,
+            transfer: None,
+        }
+    }
+
+    pub fn set_state(&mut self, state: TftpStates) {
+        self._state = state;
+    }
+
+    pub fn get_state(&self) -> TftpStates {
+        self._state
     }
 
     pub fn process_timeout(&mut self) -> Result<Vec<u8>> {
-        if self.retries >= 10 {
-            return Err(Error::MaxRetriesExceeded);
-        }
-
-        if self.timeout <= Instant::now() {
-            info!(
-                "Timeout detected. Resending last data packet. Attempt: {}",
-                self.retries
-            );
-            self.retries += 1;
-            self.reset_timeout();
-            return self.resend_last_data();
+        if let Some(trans) = &mut self.transfer {
+            return match trans.process_timeout() {
+                Ok(packet) => Ok(packet),
+                Err(Error::MaxRetriesExceeded) => {
+                    error!("Killing connection. Sending timeout");
+                    let packet = trans.send_timeout().unwrap();
+                    Err(Error::StopTftpConnection(packet))
+                }
+                Err(Error::Ignore(_) | Error::IgnoreNoLog(_)) => Err(Error::Ignore("".to_string())),
+                Err(e) => panic!("Error: {}", e),
+            };
         }
         Err(Error::IgnoreNoLog("".to_string()))
     }
 
-    pub fn reset_timeout(&mut self) {
-        self.timeout = Instant::now() + Duration::from_millis(200);
+    pub fn process(&mut self, rx_buffer: &[u8]) -> Result<Vec<u8>> {
+        let (tftp_con, wrapper) = self.recv_tftp(rx_buffer)?;
+
+        match self.get_state() {
+            TftpStates::Tsize => {
+                let trans = self.parse_ack_options(&wrapper, tftp_con).unwrap();
+
+                // If both tsize and blksize are present, we can go straight to data state
+                if trans.options.has(TftpOptionEnum::Tsize)
+                    && trans.options.has(TftpOptionEnum::Blksize)
+                {
+                    self.set_state(TftpStates::Data);
+
+                // If only tsize is present, we need to request blksize
+                } else if trans.options.has(TftpOptionEnum::Tsize) {
+                    self.set_state(TftpStates::BlkSize);
+
+                // Else throw error
+                } else {
+                    return Err(Error::Tftp(f!(
+                        "Missing tsize option. Got options: {:?}",
+                        trans.options
+                    )));
+                }
+                let packet = trans.ack_options().unwrap();
+                self.transfer = Some(trans);
+                Ok(packet)
+            }
+            TftpStates::BlkSize => {
+                let trans = {
+                    match self.parse_ack_options(&wrapper, tftp_con) {
+                        Ok(ack_opts) => ack_opts,
+                        Err(e) => {
+                            if let Error::TftpReceivedError(code, msg) = e {
+                                if u16::from(code) == 0u16 {
+                                    // Reset transfer because we received an error
+                                    // This is expected and this is how the Intel firmware does
+                                    // multiple tftp options in separate packets. This is not spec
+                                    // compliant. Eyyy
+                                    self.transfer = None;
+                                    return Err(Error::IgnoreNoLog(msg));
+                                } else {
+                                    panic!(
+                                        "Received unexpected tftp error: {}",
+                                        Error::TftpReceivedError(code, msg)
+                                    );
+                                    //return Err(Error::TftpReceivedError(code, msg));
+                                }
+                            } else {
+                                panic!("Received unexpected tftp error: {}", e);
+                                //return Err(e);
+                            }
+                        }
+                    }
+                };
+
+                let packet = trans.ack_options().unwrap();
+                self.transfer = Some(trans);
+                self.set_state(TftpStates::Data);
+                Ok(packet)
+            }
+            TftpStates::Data => match self.reply_data(&wrapper) {
+                Ok(packet) => Ok(packet),
+                Err(Error::TftpEndOfFile) => {
+                    self.transfer = None;
+                    Err(Error::TftpEndOfFile)
+                }
+                Err(e) => panic!("Received unexpected tftp error: {}", e),
+            },
+            TftpStates::Error => todo!(),
+        }
     }
 
-    pub fn resend_last_data(&mut self) -> Result<Vec<u8>> {
-        // Read file in chunks of blksize into buffer s
-        let blksize = self.options.get(TftpOptionEnum::Blksize).unwrap();
-        let mut s = vec![0u8; blksize];
-        let bytes_read = match self.handle.repeat_last_read(s.as_mut_slice()) {
-            Ok(len) => len,
+    pub fn reply_data(&mut self, wrapper: &TftpPacketWrapper) -> Result<Vec<u8>> {
+        match (*wrapper.borrow_repr(), &mut self.transfer) {
+            (Repr::Ack { block_num }, Some(t)) => {
+                // Read file in chunks of blksize into buffer s
+                let packet = t.send_data(block_num)?;
+                Ok(packet)
+            }
+            (Repr::Error { code, msg }, None | Some(_)) => {
+                let code: u16 = code.into();
+                let error = TftpError::from(code);
+                Err(Error::TftpReceivedError(error, msg.to_string()))
+            }
+            (packet, trans) => Err(Error::Tftp(f!(
+                "Received unexpected tftp packet: {:?}. transfer: {:?} ",
+                packet,
+                trans
+            ))),
+        }
+    }
+
+    pub fn parse_ack_options(
+        &self,
+        wrapper: &TftpPacketWrapper,
+        tftp_con: TftpConnection,
+    ) -> Result<Transfer<TestTftp>> {
+        {
+            match (*wrapper.borrow_repr(), &self.transfer) {
+                (
+                    Repr::ReadRequest {
+                        filename,
+                        mode,
+                        opts,
+                    },
+                    None,
+                ) => {
+                    if mode != super::parse::Mode::Octet {
+                        return Err(Error::Tftp("Only octet mode is supported".to_string()));
+                    }
+
+                    let mut t = {
+                        let file = File::open(&self.file_path)?;
+                        let xfer_idx = TestTftp::new(file);
+
+                        Transfer::new(xfer_idx, tftp_con, *wrapper.borrow_is_write())
+                    };
+
+                    for opt in opts.options() {
+                        let (name, value) = (opt.name, opt.value);
+
+                        match name {
+                            "blksize" => {
+                                match value.parse::<usize>() {
+                                    Ok(blksize) => {
+                                        t.options.add(TftpOptionEnum::Blksize, blksize);
+                                    }
+                                    Err(_) => {
+                                        return Err(Error::Tftp(f!(
+                                            "tftp: blksize option should be a number is however {}",
+                                            value
+                                        )));
+                                    }
+                                };
+                            }
+                            "tsize" => {
+                                let tsize = t.handle.file.metadata()?.len();
+                                t.options.add(TftpOptionEnum::Tsize, tsize as usize);
+                            }
+                            _ => warn!("Unhandled tftp option: {}={}", name, value),
+                        }
+                    }
+
+                    log::debug!("tftp: request for file: {}", filename);
+                    log::debug!(
+                        "tftp: {} request from: {:?}",
+                        if t.is_write { "write" } else { "read" },
+                        t
+                    );
+                    Ok(t)
+                }
+                (Repr::Error { code, msg }, None | Some(_)) => {
+                    let code: u16 = code.into();
+                    let error = TftpError::from(code);
+                    Err(Error::TftpReceivedError(error, msg.to_string()))
+                }
+                (packet, trans) => Err(Error::Tftp(f!(
+                    "Received unexpected tftp packet: {:?}. Transfer: {:?} ",
+                    packet,
+                    trans
+                ))),
+            }
+        }
+    }
+
+    pub fn recv_tftp(&self, rx_buffer: &[u8]) -> Result<(TftpConnection, TftpPacketWrapper)> {
+        let (udp, src_endpoint, src_mac_addr) =
+            crate::utils::unicast_ether_to_udp(rx_buffer, &self.server_mac, &self.server_ip)?;
+
+        let tftp_packet = match super::parse::Packet::new_checked(udp.payload()) {
+            Ok(packet) => packet,
             Err(e) => {
-                return Err(Error::Tftp(f!("tftp: error reading file: {}", e)));
+                return Err(Error::Malformed(f!("tftp: invalid packet: {}", e)));
             }
         };
-        if bytes_read == 0 {
-            log::info!("End of file reached");
-            return Err(Error::TftpEndOfFile);
-        }
 
-        let data = Repr::Data {
-            block_num: self.last_block_num,
-            data: &s.as_slice()[..bytes_read],
-        };
-        log::debug!(
-            "Sending data block {} of size {}",
-            self.last_block_num,
-            bytes_read
-        );
+        let is_write = tftp_packet.opcode() == super::parse::OpCode::Write;
 
-        let packet = crate::utils::tftp_to_ether_unicast(&data, &self.connection);
-        Ok(packet)
-    }
-
-    pub fn send_timeout(&mut self) -> Result<Vec<u8>> {
-        let err = Repr::Error {
-            code: parse::ErrorCode::Unknown(0),
-            msg: "Connection timed out",
-        };
-
-        let packet = crate::utils::tftp_to_ether_unicast(&err, &self.connection);
-        Ok(packet)
-    }
-
-    pub fn send_data(&mut self, ack_block_num: u16) -> Result<Vec<u8>> {
-        if ack_block_num != self.last_block_num {
-            return Err(Error::Tftp(f!(
-                "tftp: received ack for block {} but expected {}",
-                ack_block_num,
-                self.last_block_num
-            )));
-        }
-
-        self.reset_timeout();
-
-        // Read file in chunks of blksize into buffer s
-        let blksize = self.options.get(TftpOptionEnum::Blksize).unwrap();
-        let mut s = vec![0u8; blksize];
-        let bytes_read = match self.handle.read(s.as_mut_slice()) {
-            Ok(len) => len,
+        match super::parse::Repr::parse(&tftp_packet) {
+            Ok(repr) => repr,
             Err(e) => {
-                return Err(Error::Tftp(f!("tftp: error reading file: {}", e)));
+                return Err(Error::Malformed(f!("tftp: invalid packet: {}", e)));
             }
         };
 
-        if bytes_read == 0 {
-            log::info!("End of file reached");
-            return Err(Error::TftpEndOfFile);
-        }
-
-        let data = Repr::Data {
-            block_num: self.last_block_num + 1,
-            data: &s.as_slice()[..bytes_read],
+        let client = TftpConnection {
+            server_ip: self.server_ip,
+            server_mac: self.server_mac,
+            client_ip: Ipv4Address::from_bytes(src_endpoint.addr.as_bytes()),
+            client_mac: src_mac_addr,
+            server_port: udp.dst_port(),
+            client_port: udp.src_port(),
         };
-        self.last_block_num += 1;
-        log::debug!(
-            "Sending data block {} of size {}",
-            self.last_block_num,
-            bytes_read
-        );
 
-        let packet = crate::utils::tftp_to_ether_unicast(&data, &self.connection);
-        Ok(packet)
-    }
-
-    pub fn ack_options(&self) -> Result<Vec<u8>> {
-        let ack_opts = self.options.to_str_str();
-        let needed_bytes = ack_opts.iter().fold(0, |acc, (name, value)| {
-            acc + (TftpOption { name, value }).len()
-        });
-
-        let mut resp_opt_buf = vec![0u8; needed_bytes];
-        let mut opt_resp = parse::TftpOptsWriter::new(resp_opt_buf.as_mut_slice());
-
-        for (name, value) in ack_opts {
-            let opt = TftpOption {
-                name: &name,
-                value: &value,
-            };
-            opt_resp.emit(opt).unwrap();
+        let wrapper = TftpPacketWrapperBuilder {
+            data: udp.payload().to_vec(),
+            is_write,
+            packet_builder: |data| super::parse::Packet::new_checked(data.as_ref()).unwrap(),
+            repr_builder: |packet| super::parse::Repr::parse(packet).unwrap(),
         }
-        let written_bytes = opt_resp.written_bytes();
-        debug!(
-            "Written bytes: {} needed_bytes: {}",
-            written_bytes, needed_bytes
-        );
-        debug_assert!(written_bytes == needed_bytes);
-        let opts = parse::TftpOptsReader::new(&resp_opt_buf[..written_bytes]);
-
-        let ack = Repr::OptionAck { opts };
-        let packet = crate::utils::tftp_to_ether_unicast(&ack, &self.connection);
-        Ok(packet)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct TftpConnection {
-    pub server_ip: Ipv4Address,
-    pub server_mac: EthernetAddress,
-    pub client_ip: Ipv4Address,
-    pub client_mac: EthernetAddress,
-    pub server_port: u16,
-    pub client_port: u16,
-}
-
-impl Display for TftpConnection {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(
-            f,
-            "{}:{} -> {}:{}",
-            self.client_ip, self.client_port, self.server_ip, self.server_port
-        )
+        .build();
+        Ok((client, wrapper))
     }
 }

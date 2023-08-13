@@ -8,12 +8,12 @@ mod cli_opts;
 mod utils;
 
 use log::*;
+use rs_pxe::tftp::construct::Handle;
+use rs_pxe::tftp::construct::TestTftp;
+use rs_pxe::tftp::construct::TftpConnection;
+use rs_pxe::tftp::construct::Transfer;
 use rs_pxe::tftp::parse::TftpOption;
 use rs_pxe::tftp::parse::TftpOptsReader;
-use rs_pxe::tftp::socket::Handle;
-use rs_pxe::tftp::socket::TestTftp;
-use rs_pxe::tftp::socket::TftpConnection;
-use rs_pxe::tftp::socket::Transfer;
 use smoltcp::iface::Config;
 use smoltcp::iface::Routes;
 use smoltcp::iface::SocketSet;
@@ -155,7 +155,6 @@ fn main() {
                         Ok::<(), Error>(())
                     })
                     .unwrap();
-                    pxe_socket.reset_transfer();
                     continue;
                 }
                 Err(Error::Ignore(_) | Error::IgnoreNoLog(_)) => (),
