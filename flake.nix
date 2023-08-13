@@ -92,8 +92,6 @@
           version = "0.1.0";
         };
 
-        defaultPackage = packages.default;
-
         apps.default = utils.lib.mkApp {
           drv = self.defaultPackage."${system}";
         };
