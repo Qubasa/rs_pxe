@@ -6,8 +6,10 @@ use smoltcp::{
 
 use super::parse::Repr;
 use super::parse::{self, TftpOption};
-use crate::{prelude::*, utils};
-use std::{collections::BTreeMap, io::Seek};
+use super::utils;
+use crate::prelude::*;
+
+use std::{collections::BTreeMap, fmt::Formatter, io::Seek};
 
 /// Maximum number of retransmissions attempted by the server before giving up.
 // const MAX_RETRIES: u8 = 10;
@@ -210,6 +212,19 @@ pub struct Transfer<H> {
     pub timeout: Instant,
 }
 
+impl<H> Display for Transfer<H>
+where
+    H: Handle + std::fmt::Debug,
+{
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Transfer: connection: {}, is_write {}, handle: {:?}",
+            self.connection, self.is_write, self.handle
+        )
+    }
+}
+
 impl<H> Transfer<H>
 where
     H: Handle,
@@ -272,7 +287,7 @@ where
             bytes_read
         );
 
-        let packet = crate::utils::tftp_to_ether_unicast(&data, &self.connection);
+        let packet = utils::tftp_to_ether_unicast(&data, &self.connection);
         Ok(packet)
     }
 
@@ -282,7 +297,7 @@ where
             msg: "Connection timed out",
         };
 
-        let packet = crate::utils::tftp_to_ether_unicast(&err, &self.connection);
+        let packet = utils::tftp_to_ether_unicast(&err, &self.connection);
         Ok(packet)
     }
 
@@ -323,7 +338,7 @@ where
             bytes_read
         );
 
-        let packet = crate::utils::tftp_to_ether_unicast(&data, &self.connection);
+        let packet = utils::tftp_to_ether_unicast(&data, &self.connection);
         Ok(packet)
     }
 
@@ -344,15 +359,12 @@ where
             opt_resp.emit(opt).unwrap();
         }
         let written_bytes = opt_resp.written_bytes();
-        debug!(
-            "Written bytes: {} needed_bytes: {}",
-            written_bytes, needed_bytes
-        );
+
         debug_assert!(written_bytes == needed_bytes);
         let opts = parse::TftpOptsReader::new(&resp_opt_buf[..written_bytes]);
 
         let ack = Repr::OptionAck { opts };
-        let packet = crate::utils::tftp_to_ether_unicast(&ack, &self.connection);
+        let packet = utils::tftp_to_ether_unicast(&ack, &self.connection);
         Ok(packet)
     }
 }

@@ -55,11 +55,7 @@ pub struct DhcpReprWrapper {
     pub repr: DhcpRepr<'this>,
 }
 
-pub fn pxe_ack(
-    info: &PxeClientInfo,
-    endpoint: &smoltcp::wire::IpListenEndpoint,
-    boot_file: &str,
-) -> DhcpReprWrapper {
+pub fn pxe_ack(info: &PxeClientInfo, server_ip: Ipv4Address, boot_file: &str) -> DhcpReprWrapper {
     const IP_NULL: Ipv4Address = Ipv4Address([0, 0, 0, 0]);
 
     let client_addr = match info.client_identifier.hardware_type {
@@ -70,10 +66,6 @@ pub fn pxe_ack(
         t => panic!("Unsupported hardware type: {:#?}", t),
     };
 
-    let server_ip = match endpoint.addr.unwrap() {
-        IpAddress::Ipv4(a) => a,
-        IpAddress::Ipv6(_) => todo!("IPv6 not supported"),
-    };
     let options: Vec<DhcpOptionWrapper> = vec![];
 
     DhcpReprWrapperBuilder {

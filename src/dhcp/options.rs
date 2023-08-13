@@ -1,12 +1,11 @@
 use std::fmt::{self, Display, Formatter};
 
-use crate::error::Error;
 use modular_bitfield::prelude::*;
 use ouroboros::self_referencing;
 use smoltcp::wire::{DhcpOption, EthernetAddress, Ipv4Address};
 use uuid::Uuid;
 
-use crate::prelude::*;
+use super::error::*;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]

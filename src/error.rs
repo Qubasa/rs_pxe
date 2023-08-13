@@ -44,4 +44,7 @@ pub enum Error {
 
     #[error("Tftp end of file")]
     TftpEndOfFile,
+
+    #[error(transparent)]
+    DhcpError(#[from] crate::dhcp::error::Error),
 }

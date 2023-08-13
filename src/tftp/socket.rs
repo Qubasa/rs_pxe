@@ -4,12 +4,14 @@ use smoltcp::{
     wire::{ArpRepr, EthernetAddress, Ipv4Address},
 };
 
+use super::utils;
 use super::{construct::TftpConnection, parse::Repr};
 use super::{
     construct::{TestTftp, TftpError, TftpOptionEnum, Transfer},
     parse::{self, TftpOption},
 };
-use crate::{prelude::*, utils};
+use crate::prelude::*;
+
 use ouroboros::self_referencing;
 use std::{
     collections::BTreeMap,
@@ -210,6 +212,10 @@ impl TftpSocket {
                     }
 
                     let mut t = {
+                        log::debug!(
+                            "Creating TFTP transfer with file: {}",
+                            self.file_path.display()
+                        );
                         let file = File::open(&self.file_path)?;
                         let xfer_idx = TestTftp::new(file);
 
@@ -243,7 +249,7 @@ impl TftpSocket {
 
                     log::debug!("tftp: request for file: {}", filename);
                     log::debug!(
-                        "tftp: {} request from: {:?}",
+                        "tftp: {} request from: {}",
                         if t.is_write { "write" } else { "read" },
                         t
                     );
@@ -265,7 +271,7 @@ impl TftpSocket {
 
     pub fn recv_tftp(&self, rx_buffer: &[u8]) -> Result<(TftpConnection, TftpPacketWrapper)> {
         let (udp, src_endpoint, src_mac_addr) =
-            crate::utils::unicast_ether_to_udp(rx_buffer, &self.server_mac, &self.server_ip)?;
+            utils::unicast_ether_to_udp(rx_buffer, &self.server_mac, &self.server_ip)?;
 
         let tftp_packet = match super::parse::Packet::new_checked(udp.payload()) {
             Ok(packet) => packet,

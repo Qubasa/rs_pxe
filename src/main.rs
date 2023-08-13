@@ -184,10 +184,10 @@ fn main() {
                     .unwrap();
                 }
                 Err(Error::Ignore(e)) => {
-                    debug!("Ignore: {:?}", e);
+                    debug!("Ignoring Packet. Reason: {:?}", e);
                 }
                 Err(Error::IgnoreNoLog(e)) => {
-                    trace!("IgnoreNoLog: {:?}", e);
+                    trace!("Ignoring Packet. Reason: {:?}", e);
                 }
                 Err(e) => {
                     panic!("{:?}", e);
