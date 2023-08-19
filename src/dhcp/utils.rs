@@ -84,6 +84,37 @@ pub enum TargetingScope {
     Multicast,
 }
 
+pub fn arp_reply(repr: ArpRepr) -> Vec<u8> {
+    match repr {
+        ArpRepr::EthernetIpv4 {
+            operation: smoltcp::wire::ArpOperation::Reply,
+            source_hardware_addr,
+            source_protocol_addr: _,
+            target_hardware_addr,
+            target_protocol_addr: _,
+        } => {
+            let eth_packet = EthernetRepr {
+                dst_addr: target_hardware_addr,
+                src_addr: source_hardware_addr,
+                ethertype: EthernetProtocol::Arp,
+            };
+
+            let packet_size = eth_packet.buffer_len() + repr.buffer_len();
+
+            let mut buffer = vec![0; packet_size];
+
+            let mut packet = EthernetFrame::new_unchecked(&mut buffer[..]);
+            eth_packet.emit(&mut packet);
+
+            let mut packet = smoltcp::wire::ArpPacket::new_unchecked(packet.payload_mut());
+            repr.emit(&mut packet);
+
+            buffer
+        }
+        _ => todo!(),
+    }
+}
+
 pub fn arp_respond(
     rx_buffer: &[u8],
     server_ip: &Ipv4Address,
