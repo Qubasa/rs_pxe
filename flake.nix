@@ -60,6 +60,7 @@
           cargo-watch
           rust-analyzer-nightly
           dhcpcd
+          dnsmasq
           entr
         ];
 

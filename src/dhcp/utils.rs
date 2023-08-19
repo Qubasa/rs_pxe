@@ -115,6 +115,30 @@ pub fn arp_reply(repr: ArpRepr) -> Vec<u8> {
     }
 }
 
+pub fn ether_to_arp(buffer: &[u8]) -> Result<ArpRepr> {
+    let ether = EthernetFrame::new_checked(buffer).unwrap();
+    if ether.dst_addr() != EthernetAddress::BROADCAST {
+        return Err(Error::IgnoreNoLog("Not a broadcast packet".to_string()));
+    }
+
+    let packet = match smoltcp::wire::ArpPacket::new_checked(ether.payload()) {
+        Ok(p) => p,
+        Err(e) => {
+            let err = format!("Parsing arp packet failed: {}", e);
+            return Err(Error::IgnoreNoLog(err));
+        }
+    };
+
+    let arp = match ArpRepr::parse(&packet) {
+        Ok(a) => a,
+        Err(e) => {
+            let err = format!("Parsing arp packet failed: {}", e);
+            return Err(Error::IgnoreNoLog(err));
+        }
+    };
+    Ok(arp)
+}
+
 pub fn arp_respond(
     rx_buffer: &[u8],
     server_ip: &Ipv4Address,
@@ -160,7 +184,7 @@ pub fn arp_respond(
     }
 }
 
-pub fn handle_dhcp_ack<'a>(buffer: &'a [u8], transaction_id: u32) -> Result<DhcpPacket<&'a [u8]>> {
+pub fn handle_dhcp_ack(buffer: &[u8], transaction_id: u32) -> Result<DhcpPacket<&[u8]>> {
     let ether = EthernetFrame::new_checked(buffer).unwrap();
 
     if !ether.dst_addr().is_broadcast() {
@@ -219,7 +243,8 @@ pub fn uni_broad_ether_to_dhcp<'a>(
     server_ip: &'a Ipv4Address,
 ) -> Result<(DhcpPacket<&'a [u8]>, TargetingScope)> {
     let ether = EthernetFrame::new_checked(buffer).unwrap();
-    if ether.dst_addr() != *server_mac && !ether.dst_addr().is_broadcast() {
+    if ether.dst_addr() != *server_mac {
+        // && !ether.dst_addr().is_broadcast()
         let err: String = format!(
             "Mac address {} does not match with ours. And isn't broadcast",
             ether.dst_addr()

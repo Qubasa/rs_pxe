@@ -54,8 +54,9 @@ use super::utils::TargetingScope;
 #[derive(Debug, Clone)]
 pub enum DhcpStates {
     Discover,
-    WaitForDhcpAck(u32, PxeClientInfo),
-    Request(u32),
+    Request,
+    WaitForDhcpAck(PxeClientInfo),
+    ArpReply,
     Done,
 }
 
@@ -63,13 +64,14 @@ impl Display for DhcpStates {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             DhcpStates::Discover => write!(f, "Discover"),
-            DhcpStates::Request(transaction_id) => {
-                write!(f, "Request {{ transaction_id: {:#x} }}", transaction_id)
+            DhcpStates::Request => {
+                write!(f, "Request")
             }
             DhcpStates::Done => write!(f, "Done"),
-            DhcpStates::WaitForDhcpAck(transaction_id, info) => {
-                write!(f, "WaitForDhcpAck transaction_id: {:#x}", transaction_id)
+            DhcpStates::WaitForDhcpAck(_info) => {
+                write!(f, "WaitForDhcpAck")
             }
+            DhcpStates::ArpReply => write!(f, "ArpReply"),
         }
     }
 }
@@ -80,6 +82,7 @@ pub struct DhcpSocket {
     offer_file_name: String,
     server_mac: EthernetAddress,
     server_ip: Ipv4Address,
+    transaction_id: Option<u32>,
     firmware_type: Option<dhcp::parse::FirmwareType>,
 }
 
@@ -126,6 +129,7 @@ impl DhcpSocket {
 
         Self {
             _state: state,
+            transaction_id: None,
             server_mac,
             server_ip,
             offer_file_name,
@@ -190,7 +194,8 @@ impl DhcpSocket {
                 */
                 match info.firmware_type {
                     dhcp::parse::FirmwareType::Unknown => {
-                        self.set_state(DhcpStates::Request(info.transaction_id));
+                        self.transaction_id = Some(info.transaction_id);
+                        self.set_state(DhcpStates::Request);
                     }
                     dhcp::parse::FirmwareType::IPxe => {
                         info!("iPXE firmware detected. Jumping to TFTP phase");
@@ -201,7 +206,7 @@ impl DhcpSocket {
 
                 Ok(packet)
             }
-            DhcpStates::Request(transaction_id) => {
+            DhcpStates::Request => {
                 /*  ================== Parse PXE Request ================== */
                 /*
                 Step 5. The client selects and discovers a Boot Server. This packet may be sent broadcast (port 67),
@@ -229,14 +234,14 @@ impl DhcpSocket {
                         return Err(Error::Ignore("Not a dhcp request packet".to_string()));
                     }
 
-                    if info.transaction_id != *transaction_id {
+                    if info.transaction_id != self.transaction_id.unwrap() {
                         return Err(Error::Ignore("Not the same transaction id".to_string()));
                     }
 
                     match scope {
                         utils::TargetingScope::Unicast => (),
                         utils::TargetingScope::Broadcast => {
-                            self.set_state(DhcpStates::WaitForDhcpAck(*transaction_id, info));
+                            self.set_state(DhcpStates::WaitForDhcpAck(info));
                             return Err(Error::WaitForDhcpAck);
                         }
                         utils::TargetingScope::Multicast => todo!("Multicast is not supported"),
@@ -283,12 +288,12 @@ impl DhcpSocket {
 
                 Ok(packet)
             }
-            DhcpStates::WaitForDhcpAck(transaction_id, info) => {
-                let dhcp = utils::handle_dhcp_ack(rx_buffer, *transaction_id).unwrap();
+            DhcpStates::WaitForDhcpAck(info) => {
+                let dhcp = utils::handle_dhcp_ack(rx_buffer, self.transaction_id.unwrap()).unwrap();
                 let client_ip_addr = dhcp.your_ip();
 
                 let dhcp_repr =
-                    dhcp::construct::pxe_ack(&info, self.server_ip, &self.offer_file_name);
+                    dhcp::construct::pxe_ack(info, self.server_ip, &self.offer_file_name);
                 let packet = utils::dhcp_to_ether_unicast(
                     dhcp_repr.borrow_repr(),
                     &client_ip_addr,
@@ -305,11 +310,19 @@ impl DhcpSocket {
                 downloaded code in memory is dependent on the client’s CPU architecture.
                 */
 
-                self.set_state(DhcpStates::Done);
+                self.set_state(DhcpStates::ArpReply);
 
                 Ok(packet)
 
                 //self.set_state(DhcpStates::Request(info.transaction_id));
+            }
+            DhcpStates::ArpReply => {
+                self.set_state(DhcpStates::Request);
+                Ok(utils::arp_respond(
+                    rx_buffer,
+                    &self.server_ip,
+                    &self.server_mac,
+                )?)
             }
             DhcpStates::Done => Err(Error::DhcpProtocolFinished),
         }

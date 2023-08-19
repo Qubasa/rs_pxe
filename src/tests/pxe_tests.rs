@@ -81,7 +81,7 @@ pub fn amd_efi() {
     let mut pxe_socket = PxeSocket::new(server_ip, server_mac, &pxe_image, &kernel_image);
 
     // Emulate the DHCP Discover phase
-    let res = cmp_impl_responses(
+    let _res = cmp_impl_responses(
         &mut pxe_socket,
         Path::new("./assets/amd_efi_dhcp.pcapng"),
         |e| panic!("{}", e),
