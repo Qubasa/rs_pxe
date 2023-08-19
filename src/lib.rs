@@ -186,7 +186,6 @@ impl PxeSocket {
                 Ok(packet) => Ok(packet),
                 Err(dhcp::error::Error::DhcpProtocolFinished) => {
                     self.set_state(PxeStates::Tftp);
-                    dbg!();
                     self.process(rx_buffer)
                 }
 
@@ -223,7 +222,6 @@ impl PxeSocket {
                 match self.tftp_socket.as_mut().unwrap().process(rx_buffer) {
                     Err(Error::TftpEndOfFile) => {
                         self.reset_state();
-                        dbg!(());
                         self.process(rx_buffer)
                     }
                     Ok(packet) => Ok(packet),

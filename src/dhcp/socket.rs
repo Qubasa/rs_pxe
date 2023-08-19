@@ -284,8 +284,7 @@ impl DhcpSocket {
                 Ok(packet)
             }
             DhcpStates::WaitForDhcpAck(transaction_id, info) => {
-                let dhcp =
-                    utils::handle_dhcp_ack(rx_buffer, &self.server_mac, &self.server_ip).unwrap();
+                let dhcp = utils::handle_dhcp_ack(rx_buffer, *transaction_id).unwrap();
                 let client_ip_addr = dhcp.your_ip();
 
                 let dhcp_repr =

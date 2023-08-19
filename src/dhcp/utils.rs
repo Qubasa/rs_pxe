@@ -84,11 +84,7 @@ pub enum TargetingScope {
     Multicast,
 }
 
-pub fn handle_dhcp_ack<'a>(
-    buffer: &'a [u8],
-    server_mac: &'a EthernetAddress,
-    server_ip: &'a Ipv4Address,
-) -> Result<DhcpPacket<&'a [u8]>> {
+pub fn handle_dhcp_ack<'a>(buffer: &'a [u8], transaction_id: u32) -> Result<DhcpPacket<&'a [u8]>> {
     let ether = EthernetFrame::new_checked(buffer).unwrap();
 
     if !ether.dst_addr().is_broadcast() {
@@ -130,6 +126,14 @@ pub fn handle_dhcp_ack<'a>(
             return Err(Error::Ignore(err));
         }
     };
+
+    if dhcp.transaction_id() != transaction_id {
+        return Err(Error::Ignore(f!(
+            "Unmatching transaction_ud. Waiting for ACK with id {} is however {}",
+            transaction_id,
+            dhcp.transaction_id()
+        )));
+    }
     Ok(dhcp)
 }
 

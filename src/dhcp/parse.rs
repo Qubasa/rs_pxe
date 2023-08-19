@@ -56,7 +56,6 @@ pub fn pxe_discover(dhcp: DhcpPacket<&[u8]>) -> Result<PxeClientInfo> {
                     client_arch = Some(t);
                 }
                 SubsetDhcpOption::ClientNetworkInterfaceIdentifier => {
-                    dbg!(option.data);
                     let t = NetworkInterfaceVersion::try_from(option.data).map_err(|e| {
                         Error::Malformed(f!("Invalid network interface version: {}", e))
                     })?;
