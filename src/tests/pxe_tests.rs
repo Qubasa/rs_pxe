@@ -69,3 +69,24 @@ pub fn ipxe() {
     );
     verify_responses(&res);
 }
+
+#[test]
+pub fn amd_efi() {
+    setup();
+
+    let server_ip = Ipv4Address::new(151, 216, 192, 203);
+    let server_mac = EthernetAddress::from_bytes(&[0x98, 0xfa, 0x9b, 0x4b, 0xb2, 0xc4]);
+    let pxe_image = std::path::PathBuf::from_str("./assets/ipxe.pxe").unwrap();
+    let kernel_image = std::path::PathBuf::from_str("./assets/kernel.elf").unwrap();
+    let mut pxe_socket = PxeSocket::new(server_ip, server_mac, &pxe_image, &kernel_image);
+
+    // Emulate the DHCP Discover phase
+    let res = cmp_impl_responses(
+        &mut pxe_socket,
+        Path::new("./assets/amd_efi_dhcp.pcapng"),
+        |e| panic!("{}", e),
+    );
+    //verify_responses(&res);
+
+    // assert_eq!(pxe_socket.get_state(), &PxeStates::Tftp);
+}

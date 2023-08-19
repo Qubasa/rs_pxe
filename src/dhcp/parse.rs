@@ -47,14 +47,16 @@ pub fn pxe_discover(dhcp: DhcpPacket<&[u8]>) -> Result<PxeClientInfo> {
                 SubsetDhcpOption::MessageType => {
                     // Message Type
                     let mtype = DhcpMessageType::try_from(option.data[0])
-                        .map_err(|e| Error::Malformed(f!("Invalid message type: {}", e)))?;
+                        .map_err(|e| Error::Malformed(f!("Invalid message type: {}", e)))
+                        .unwrap();
                     msg_type = Some(mtype);
                 }
                 SubsetDhcpOption::ClientSystemArchitecture => {
-                    let t = ClientArchType::try_from(option.data)?;
+                    let t = ClientArchType::try_from(option.data).unwrap();
                     client_arch = Some(t);
                 }
                 SubsetDhcpOption::ClientNetworkInterfaceIdentifier => {
+                    dbg!(option.data);
                     let t = NetworkInterfaceVersion::try_from(option.data).map_err(|e| {
                         Error::Malformed(f!("Invalid network interface version: {}", e))
                     })?;
@@ -62,16 +64,17 @@ pub fn pxe_discover(dhcp: DhcpPacket<&[u8]>) -> Result<PxeClientInfo> {
                     network_interface_version = Some(t);
                 }
                 SubsetDhcpOption::ClientUuid => {
-                    let t = PxeUuid::try_from(option.data)?;
+                    let t = PxeUuid::try_from(option.data).unwrap();
                     client_uuid = Some(t);
                 }
                 SubsetDhcpOption::VendorClassIdentifier => {
-                    let s = VendorClassIdentifier::try_from(option.data)?;
+                    let s = VendorClassIdentifier::try_from(option.data).unwrap();
                     vendor_id = Some(s);
                 }
                 SubsetDhcpOption::ClientIdentifier => {
                     let t = ClientIdentifier::try_from(option.data)
-                        .map_err(|e| Error::Malformed(f!("Invalid client identifier: {}", e)))?;
+                        .map_err(|e| Error::Malformed(f!("Invalid client identifier: {}", e)))
+                        .unwrap();
                     client_identifier = Some(t);
                 }
                 SubsetDhcpOption::ParameterRequestList | SubsetDhcpOption::MaximumMessageSize => {

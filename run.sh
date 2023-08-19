@@ -12,6 +12,7 @@ RUST_IF=rust_tap
 uefi_pxe=false
 ipxe=false
 none=false
+LOG_LEVEL="DEBUG"
 
 # Loop over the arguments
 while [[ $# -gt 0 ]]; do
@@ -25,6 +26,9 @@ while [[ $# -gt 0 ]]; do
       ;;
       --none) # Set ipxe to true if --ipxe is present
       none=true
+      ;;
+      --trace) # Set ipxe to true if --ipxe is present
+      LOG_LEVEL="TRACE"
       ;;
     -i|--interface) # Set the interface name
       LAN=$2
@@ -116,7 +120,10 @@ pkill rs_pxe || true
 rm -f ./target/debug/rs_pxe
 cargo build
 sudo setcap cap_net_admin,cap_net_raw=eip ./target/debug/rs_pxe
-./target/debug/rs_pxe -l DEBUG --ipxe ./assets/ipxe.pxe --kernel ./assets/kernel.elf --raw -i $LAN &
+
+
+./target/debug/rs_pxe -l $LOG_LEVEL --ipxe ./assets/ipxe.pxe --kernel ./assets/kernel.elf --raw -i $LAN --ip 192.168.32.1/24 --mac "36:ff:35:46:e0:eb" &
+
 
 # IPXE Boot Emulation
 if $ipxe; then

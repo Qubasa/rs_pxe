@@ -13,6 +13,7 @@ use ouroboros::self_referencing;
 
 use smoltcp::iface::Interface;
 use smoltcp::iface::SocketSet;
+use smoltcp::phy;
 use smoltcp::phy::Checksum;
 use smoltcp::phy::ChecksumCapabilities;
 use smoltcp::phy::Device;
@@ -39,7 +40,7 @@ use smoltcp::wire::UdpRepr;
 
 use crate::prelude::*;
 
-pub fn arp_announce(address: EthernetAddress, ip_addr: Ipv4Address) -> Vec<u8> {
+pub fn build_arp_announce(address: EthernetAddress, ip_addr: Ipv4Address) -> Vec<u8> {
     let arp_repr = ArpRepr::EthernetIpv4 {
         operation: smoltcp::wire::ArpOperation::Request,
         source_hardware_addr: address,
@@ -145,9 +146,15 @@ where
         smoltcp::phy::wait(fd, iface.poll_delay(timestamp, &sockets)).expect("dhcp timeout error");
     }
 
+    arp_announce(device, iface);
+}
+
+pub fn arp_announce<DeviceT: AsRawFd>(device: &mut DeviceT, iface: &mut Interface)
+where
+    DeviceT: for<'d> Device,
+{
     let time = Instant::now();
-    smoltcp::phy::wait(fd, None).unwrap();
-    let (_rx_token, tx_token) = device.receive(time).unwrap();
+    let tx_token = device.transmit(time).unwrap();
 
     // Get interface mac and ip
     let server_mac = match iface.hardware_addr() {
@@ -157,7 +164,7 @@ where
     let server_ip = iface.ipv4_addr().unwrap();
 
     use smoltcp::phy::TxToken;
-    let packet = arp_announce(server_mac, server_ip);
+    let packet = build_arp_announce(server_mac, server_ip);
     tx_token.consume(packet.len(), |buffer| {
         buffer.copy_from_slice(&packet);
     });

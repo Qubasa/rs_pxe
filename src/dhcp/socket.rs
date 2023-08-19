@@ -33,6 +33,7 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::convert::TryFrom;
+use std::fmt::write;
 use std::fmt::Display;
 use std::fs::File;
 use std::io::Read;
@@ -44,13 +45,16 @@ use uuid::Uuid;
 
 use crate::dhcp;
 
+use super::parse::PxeClientInfo;
 use super::utils;
 
 use super::error::*;
+use super::utils::TargetingScope;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone)]
 pub enum DhcpStates {
     Discover,
+    WaitForDhcpAck(u32, PxeClientInfo),
     Request(u32),
     Done,
 }
@@ -63,6 +67,9 @@ impl Display for DhcpStates {
                 write!(f, "Request {{ transaction_id: {:#x} }}", transaction_id)
             }
             DhcpStates::Done => write!(f, "Done"),
+            DhcpStates::WaitForDhcpAck(transaction_id, info) => {
+                write!(f, "WaitForDhcpAck transaction_id: {:#x}", transaction_id)
+            }
         }
     }
 }
@@ -210,7 +217,7 @@ impl DhcpSocket {
                   - The Boot Server type in a PXE option field
                 */
                 let (info, ip, mac) = {
-                    let dhcp = utils::uni_broad_ether_to_dhcp(
+                    let (dhcp, scope) = utils::uni_broad_ether_to_dhcp(
                         rx_buffer,
                         &self.server_mac,
                         &self.server_ip,
@@ -226,11 +233,24 @@ impl DhcpSocket {
                         return Err(Error::Ignore("Not the same transaction id".to_string()));
                     }
 
+                    match scope {
+                        utils::TargetingScope::Unicast => (),
+                        utils::TargetingScope::Broadcast => {
+                            self.set_state(DhcpStates::WaitForDhcpAck(*transaction_id, info));
+                            return Err(Error::WaitForDhcpAck);
+                        }
+                        utils::TargetingScope::Multicast => todo!("Multicast is not supported"),
+                    }
+
                     Ok::<_, Error>((info, dhcp.client_ip(), dhcp.client_hardware_address()))
                 }?;
 
                 log::info!("Parsed PXE Request");
                 log::info!("Sending PXE ACK to {} with ip {}", mac, ip);
+
+                // Breaks here because we send an ACK with IP broadcast back but we need to send an ACK with IP unicast
+                // However to know the IP Address of the PXE Client we need to wait for the DHCP server to ACK the Requested IP first
+                // Then we use that IP to send ourselves a PXE ACK
 
                 /* ================== Send PXE ACK ================== */
                 /*
@@ -262,6 +282,35 @@ impl DhcpSocket {
                 self.set_state(DhcpStates::Done);
 
                 Ok(packet)
+            }
+            DhcpStates::WaitForDhcpAck(transaction_id, info) => {
+                let dhcp =
+                    utils::handle_dhcp_ack(rx_buffer, &self.server_mac, &self.server_ip).unwrap();
+                let client_ip_addr = dhcp.your_ip();
+
+                let dhcp_repr =
+                    dhcp::construct::pxe_ack(&info, self.server_ip, &self.offer_file_name);
+                let packet = utils::dhcp_to_ether_unicast(
+                    dhcp_repr.borrow_repr(),
+                    &client_ip_addr,
+                    &dhcp.client_hardware_address(),
+                    &self.server_ip,
+                    &self.server_mac,
+                );
+
+                log::info!("Sent PXE ACK");
+
+                /*
+                Step 7. The client downloads the executable file using either standard TFTP (port69) or MTFTP
+                (port assigned in Boot Server Ack packet). The file downloaded and the placement of the
+                downloaded code in memory is dependent on the client’s CPU architecture.
+                */
+
+                self.set_state(DhcpStates::Done);
+
+                Ok(packet)
+
+                //self.set_state(DhcpStates::Request(info.transaction_id));
             }
             DhcpStates::Done => Err(Error::DhcpProtocolFinished),
         }

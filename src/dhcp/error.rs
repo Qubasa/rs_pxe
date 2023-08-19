@@ -1,5 +1,7 @@
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
+    #[error("Wait for DHCP Ack")]
+    WaitForDhcpAck,
     #[error("Unknown DHCP value: {0}")]
     UnknownDhcpValue(u64),
     #[error("Missing DHCP option: {0}")]

@@ -27,6 +27,7 @@ use smoltcp::phy::TxToken;
 use smoltcp::socket::dhcpv4;
 use smoltcp::time::Duration;
 use smoltcp::time::Instant;
+use smoltcp::wire;
 use smoltcp::wire::DhcpMessageType;
 use smoltcp::wire::DhcpPacket;
 use smoltcp::wire::EthernetAddress;
@@ -59,12 +60,18 @@ use rs_pxe::tftp;
 use crate::dhcp::options::*;
 use prelude::*;
 use rs_pxe::*;
+use std::net::Ipv4Addr;
 
 //RFC: https://datatracker.ietf.org/doc/html/rfc2132
 fn main() {
     let (mut opts, mut _free) = cli_opts::create_options();
 
     let mut matches = cli_opts::parse_options(&opts, _free);
+
+    //TODO: Detect that interface has not set a static ip address
+    let static_ip = matches
+        .opt_str("ip")
+        .map(|ip| Ipv4Cidr::from_str(&ip).expect("Invalid ipv4 cidr"));
 
     let v = match matches.opt_str("level") {
         Some(v) => v,
@@ -98,10 +105,18 @@ fn main() {
     let interface = matches
         .opt_str("interface")
         .expect("Interface not specified");
-    let mac = mac_address::mac_address_by_name(&interface)
-        .unwrap()
-        .unwrap();
-    let hardware_addr: &EthernetAddress = &EthernetAddress::from_bytes(&mac.bytes());
+
+    let hardware_addr = {
+        match matches.opt_str("mac") {
+            Some(mac_str) => EthernetAddress::from_str(&mac_str).expect("Invalid MAC address"),
+            None => {
+                let mac = mac_address::mac_address_by_name(&interface)
+                    .unwrap()
+                    .unwrap();
+                EthernetAddress::from_bytes(&mac.bytes())
+            }
+        }
+    };
 
     if matches.opt_present("raw") {
         let mut device = match RawSocket::new(&interface, Medium::Ethernet) {
@@ -113,15 +128,21 @@ fn main() {
 
         // Create interface
         let mut config = match device.capabilities().medium {
-            Medium::Ethernet => Config::new(Into::into(*hardware_addr)),
-            Medium::Ip => Config::new(smoltcp::wire::HardwareAddress::Ip),
+            Medium::Ethernet => Config::new(Into::into(hardware_addr)),
+            Medium::Ip => Config::new(wire::HardwareAddress::Ip),
             Medium::Ieee802154 => todo!(),
         };
         config.random_seed = rand::random();
 
         let mut iface = Interface::new(config, &mut device);
 
-        utils::get_ip(&mut device, &mut iface);
+        if let Some(ip) = static_ip {
+            iface.update_ip_addrs(|ip_addr| {
+                ip_addr.push(wire::IpCidr::Ipv4(ip)).unwrap();
+            });
+        } else {
+            utils::get_ip(&mut device, &mut iface);
+        }
 
         // Get interface mac and ip
         let server_mac = match iface.hardware_addr() {
@@ -139,7 +160,6 @@ fn main() {
             match pxe_socket.process_timeout() {
                 Ok(packet) => {
                     let mut tx = device.transmit(Instant::now()).unwrap();
-                    debug!("Resending last packet.");
                     tx.consume(packet.len(), |buffer| {
                         buffer.copy_from_slice(&packet);
                         Ok::<(), Error>(())
@@ -168,7 +188,6 @@ fn main() {
                 None => {
                     let diff = Instant::now() - last_time;
                     last_time = Instant::now();
-                    trace!("Last timeout was {}ms ago", diff.millis());
                     continue;
                 }
             };
@@ -199,7 +218,7 @@ fn main() {
 
         // Create interface
         let mut config = match device.capabilities().medium {
-            Medium::Ethernet => Config::new(Into::into(*hardware_addr)),
+            Medium::Ethernet => Config::new(Into::into(hardware_addr)),
             Medium::Ip => panic!("Tap interface does not support IP"),
             Medium::Ieee802154 => todo!(),
         };

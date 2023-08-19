@@ -148,7 +148,7 @@ impl TryFrom<&[u8]> for ClientArchType {
     fn try_from(value: &[u8]) -> Result<Self> {
         use ClientArchType::*;
         let array = <&[u8; 2]>::try_from(value)?;
-        let value = u16::from_le_bytes(*array);
+        let value = u16::from_be_bytes(*array);
         let res = match value {
             0 => X86Bios,
             1 => PC98,
@@ -242,9 +242,9 @@ impl TryFrom<&[u8]> for NetworkInterfaceVersion {
 
     fn try_from(value: &[u8]) -> Result<Self> {
         let array = <&[u8; 3]>::try_from(value)?;
-        let interface_type = NetworkInterfaceType::try_from(array[2])?;
-        let minor = array[0];
-        let major = array[1];
+        let interface_type = NetworkInterfaceType::try_from(array[0])?;
+        let minor = array[1];
+        let major = array[2];
 
         Ok(NetworkInterfaceVersion {
             interface_type,

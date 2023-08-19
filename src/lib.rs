@@ -23,6 +23,7 @@ use tftp::construct::Handle;
 use tftp::construct::TestTftp;
 use tftp::construct::TftpConnection;
 use tftp::construct::Transfer;
+use utils::build_arp_announce;
 
 use core::panic;
 use ouroboros::self_referencing;
@@ -73,7 +74,9 @@ use uuid::Uuid;
 
 use crate::tftp::socket::TftpStates;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+static ARP_TIMEOUT: Duration = Duration::from_secs(1);
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum PxeStates {
     Dhcp,
     Tftp,
@@ -97,6 +100,7 @@ pub struct PxeSocket {
     server_ip: Ipv4Address,
     dhcp_socket: dhcp::socket::DhcpSocket,
     tftp_socket: Option<TftpSocket>,
+    timeout: Instant,
 }
 
 impl PxeSocket {
@@ -127,6 +131,11 @@ impl PxeSocket {
     }
 
     pub fn process_timeout(&mut self) -> Result<Vec<u8>> {
+        if self.timeout < Instant::now() {
+            self.timeout = Instant::now() + ARP_TIMEOUT;
+            return Ok(build_arp_announce(self.server_mac, self.server_ip));
+        }
+
         if let Some(tftp_socket) = &mut self.tftp_socket {
             return match tftp_socket.process_timeout() {
                 Ok(packet) => Ok(packet),
@@ -161,6 +170,7 @@ impl PxeSocket {
 
         Self {
             _state: state,
+            timeout: Instant::now() + ARP_TIMEOUT,
             tftp_socket: None,
             server_mac,
             server_ip,
@@ -176,12 +186,17 @@ impl PxeSocket {
                 Ok(packet) => Ok(packet),
                 Err(dhcp::error::Error::DhcpProtocolFinished) => {
                     self.set_state(PxeStates::Tftp);
+                    dbg!();
                     self.process(rx_buffer)
                 }
+
                 Err(dhcp::error::Error::IgnoreNoLog(e)) => Err(Error::IgnoreNoLog(e)),
                 Err(dhcp::error::Error::Ignore(e)) => Err(Error::Ignore(e)),
                 Err(dhcp::error::Error::MissingDhcpOption(opt)) => {
                     Err(Error::Ignore(f!("Missing DHCP option: {opt}")))
+                }
+                Err(dhcp::error::Error::WaitForDhcpAck) => {
+                    Err(Error::Ignore("Waiting for DHCP Ack Packet".to_string()))
                 }
                 Err(e) => Err(e.into()),
             },
@@ -208,6 +223,7 @@ impl PxeSocket {
                 match self.tftp_socket.as_mut().unwrap().process(rx_buffer) {
                     Err(Error::TftpEndOfFile) => {
                         self.reset_state();
+                        dbg!(());
                         self.process(rx_buffer)
                     }
                     Ok(packet) => Ok(packet),

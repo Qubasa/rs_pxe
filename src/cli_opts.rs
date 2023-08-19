@@ -59,9 +59,11 @@ pub fn create_options() -> (Options, Vec<&'static str>) {
         "Path to kernel image serve",
         "./build/vmlinuz",
     );
+    opts.optopt("", "ip", "Ip address of interface", "192.168.178.25/24");
     opts.optflag("", "raw", "Interface to use");
     opts.optflag("", "tun", "TUN interface to use");
     opts.optflag("", "tap", "TAP interface to use");
+    opts.optopt("", "mac", "MAC address of interface", "98:fa:9b:4b:b2:c4");
     opts.optopt(
         "l",
         "level",

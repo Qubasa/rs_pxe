@@ -6,6 +6,7 @@ use crate::tftp;
 use crate::tftp::construct::Handle;
 use crate::tftp::construct::TftpConnection;
 
+use env_logger::Target;
 use ouroboros::self_referencing;
 
 use smoltcp::iface::Interface;
@@ -76,16 +77,23 @@ pub fn broadcast_ether_to_dhcp(buffer: &[u8]) -> Result<DhcpPacket<&[u8]>> {
     Ok(dhcp)
 }
 
-pub fn uni_broad_ether_to_dhcp<'a>(
+#[derive(Debug, Copy, Clone)]
+pub enum TargetingScope {
+    Unicast,
+    Broadcast,
+    Multicast,
+}
+
+pub fn handle_dhcp_ack<'a>(
     buffer: &'a [u8],
     server_mac: &'a EthernetAddress,
     server_ip: &'a Ipv4Address,
 ) -> Result<DhcpPacket<&'a [u8]>> {
     let ether = EthernetFrame::new_checked(buffer).unwrap();
-    if ether.dst_addr() != *server_mac {
-        return Err(Error::IgnoreNoLog(
-            "Mac address does not match with ours. And isn't broardcast".to_string(),
-        ));
+
+    if !ether.dst_addr().is_broadcast() {
+        let err: String = format!("Mac address {} isn't broadcast", ether.dst_addr());
+        return Err(Error::IgnoreNoLog(err));
     }
 
     let ipv4 = match Ipv4Packet::new_checked(ether.payload()) {
@@ -96,7 +104,69 @@ pub fn uni_broad_ether_to_dhcp<'a>(
         }
     };
 
-    if ipv4.dst_addr() != *server_ip {
+    if !ipv4.dst_addr().is_broadcast() {
+        return Err(Error::IgnoreNoLog("Ip address isn't broadcast".to_string()));
+    }
+
+    let udp = match UdpPacket::new_checked(ipv4.payload()) {
+        Ok(u) => u,
+        Err(e) => {
+            let err = format!("Parsing udp packet failed: {}", e);
+            return Err(Error::IgnoreNoLog(err));
+        }
+    };
+
+    if udp.dst_port() != 68 {
+        return Err(Error::IgnoreNoLog(format!(
+            "Not a dhcp packet. Port does not match ({} != 68)",
+            udp.dst_port()
+        )));
+    }
+
+    let dhcp = match DhcpPacket::new_checked(udp.payload()) {
+        Ok(d) => d,
+        Err(e) => {
+            let err = format!("Parsing dhcp packet failed: {}", e);
+            return Err(Error::Ignore(err));
+        }
+    };
+    Ok(dhcp)
+}
+
+pub fn uni_broad_ether_to_dhcp<'a>(
+    buffer: &'a [u8],
+    server_mac: &'a EthernetAddress,
+    server_ip: &'a Ipv4Address,
+) -> Result<(DhcpPacket<&'a [u8]>, TargetingScope)> {
+    let ether = EthernetFrame::new_checked(buffer).unwrap();
+    if ether.dst_addr() != *server_mac && !ether.dst_addr().is_broadcast() {
+        let err: String = format!(
+            "Mac address {} does not match with ours. And isn't broadcast",
+            ether.dst_addr()
+        );
+        return Err(Error::IgnoreNoLog(err));
+    }
+
+    let ipv4 = match Ipv4Packet::new_checked(ether.payload()) {
+        Ok(i) => i,
+        Err(e) => {
+            let err = format!("Parsing ipv4 packet failed: {}", e);
+            return Err(Error::IgnoreNoLog(err));
+        }
+    };
+
+    let target_scope: TargetingScope = {
+        if ipv4.dst_addr().is_broadcast() {
+            TargetingScope::Broadcast
+        } else if ipv4.dst_addr().is_multicast() {
+            TargetingScope::Multicast
+        } else {
+            debug_assert!(ipv4.dst_addr().is_unicast());
+            TargetingScope::Unicast
+        }
+    };
+
+    if ipv4.dst_addr() != *server_ip && !ipv4.dst_addr().is_broadcast() {
         return Err(Error::IgnoreNoLog(
             "IP destination does not match our server ip".to_string(),
         ));
@@ -110,10 +180,18 @@ pub fn uni_broad_ether_to_dhcp<'a>(
         }
     };
 
-    if udp.dst_port() != 4011 {
-        return Err(Error::IgnoreNoLog(
-            "Not a dhcp packet. Port does not match".to_string(),
-        ));
+    if ipv4.dst_addr().is_broadcast() {
+        if udp.dst_port() != 67 {
+            return Err(Error::IgnoreNoLog(format!(
+                "Not a dhcp packet. Port does not match ({} != 67)",
+                udp.dst_port()
+            )));
+        }
+    } else if udp.dst_port() != 4011 {
+        return Err(Error::IgnoreNoLog(format!(
+            "Not a dhcp packet. Port does not match ({} != 4011)",
+            udp.dst_port()
+        )));
     }
 
     let dhcp = match DhcpPacket::new_checked(udp.payload()) {
@@ -123,7 +201,7 @@ pub fn uni_broad_ether_to_dhcp<'a>(
             return Err(Error::Ignore(err));
         }
     };
-    Ok(dhcp)
+    Ok((dhcp, target_scope))
 }
 
 pub fn dhcp_to_ether_brdcast<'a>(
