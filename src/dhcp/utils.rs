@@ -84,6 +84,51 @@ pub enum TargetingScope {
     Multicast,
 }
 
+pub fn arp_respond(
+    rx_buffer: &[u8],
+    server_ip: &Ipv4Address,
+    server_mac: &EthernetAddress,
+) -> Result<Vec<u8>> {
+    let arp = ether_to_arp(rx_buffer)?;
+
+    match arp {
+        ArpRepr::EthernetIpv4 {
+            operation,
+            target_protocol_addr,
+            target_hardware_addr: _,
+            source_hardware_addr,
+            source_protocol_addr,
+        } => {
+            if target_protocol_addr != *server_ip {
+                return Err(Error::Ignore(f!(
+                    "Ignoring arp packet with target ip: {}",
+                    target_protocol_addr
+                )));
+            }
+
+            if operation != smoltcp::wire::ArpOperation::Request {
+                return Err(Error::Ignore(f!(
+                    "Ignoring arp packet with operation: {:?}",
+                    operation
+                )));
+            }
+
+            let arp = ArpRepr::EthernetIpv4 {
+                operation: smoltcp::wire::ArpOperation::Reply,
+                source_hardware_addr: *server_mac,
+                source_protocol_addr: *server_ip,
+                target_hardware_addr: source_hardware_addr,
+                target_protocol_addr: source_protocol_addr,
+            };
+
+            let packet = arp_reply(arp);
+
+            Ok(packet)
+        }
+        _ => todo!(),
+    }
+}
+
 pub fn handle_dhcp_ack<'a>(buffer: &'a [u8], transaction_id: u32) -> Result<DhcpPacket<&'a [u8]>> {
     let ether = EthernetFrame::new_checked(buffer).unwrap();
 
