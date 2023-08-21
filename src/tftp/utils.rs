@@ -37,7 +37,7 @@ use smoltcp::wire::Ipv4Repr;
 use smoltcp::wire::UdpPacket;
 use smoltcp::wire::UdpRepr;
 
-use crate::prelude::*;
+use super::error::*;
 
 pub fn unicast_ether_to_udp<'a>(
     buffer: &'a [u8],

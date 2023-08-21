@@ -301,8 +301,8 @@ pub fn uni_broad_ether_to_dhcp<'a>(
     };
 
     let connection = DhcpConnection {
-        server_ip: server_ip.clone(),
-        server_mac: server_mac.clone(),
+        server_ip: *server_ip,
+        server_mac: *server_mac,
         client_ip: dhcp.client_ip(),
         client_mac: dhcp.client_hardware_address(),
         server_port: udp.dst_port(),

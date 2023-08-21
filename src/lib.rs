@@ -139,11 +139,13 @@ impl PxeSocket {
         if let Some(tftp_socket) = &mut self.tftp_socket {
             return match tftp_socket.process_timeout() {
                 Ok(packet) => Ok(packet),
-                Err(Error::StopTftpConnection(packet)) => {
+                Err(tftp::error::Error::StopTftpConnection(packet)) => {
                     self.reset_state();
                     Ok(packet)
                 }
-                Err(e) => Err(e),
+                Err(tftp::error::Error::Ignore(e)) => Err(Error::Ignore(e)),
+                Err(tftp::error::Error::IgnoreNoLog(e)) => Err(Error::IgnoreNoLog(e)),
+                Err(e) => panic!("{}", e),
             };
         }
         Err(Error::IgnoreNoLog("Nothing todo".to_string()))
@@ -197,7 +199,7 @@ impl PxeSocket {
                 Err(dhcp::error::Error::WaitForDhcpAck) => {
                     Err(Error::Ignore("Waiting for DHCP Ack Packet".to_string()))
                 }
-                Err(e) => Err(e.into()),
+                Err(e) => panic!("{}", e),
             },
             PxeStates::Tftp => {
                 if self.tftp_socket.is_none() {
@@ -220,12 +222,14 @@ impl PxeSocket {
                 }
 
                 match self.tftp_socket.as_mut().unwrap().process(rx_buffer) {
-                    Err(Error::TftpEndOfFile) => {
+                    Err(tftp::error::Error::TftpEndOfFile) => {
                         self.reset_state();
                         self.process(rx_buffer)
                     }
+                    Err(tftp::error::Error::Ignore(e)) => Err(Error::Ignore(e)),
+                    Err(tftp::error::Error::IgnoreNoLog(e)) => Err(Error::IgnoreNoLog(e)),
                     Ok(packet) => Ok(packet),
-                    Err(e) => Err(e),
+                    Err(e) => panic!("{}", e),
                 }
             }
         }

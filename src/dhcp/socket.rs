@@ -56,8 +56,6 @@ use super::utils::TargetingScope;
 pub enum DhcpStates {
     Discover,
     Request,
-    WaitForDhcpAck(PxeClientInfo),
-    ArpReply,
     Done,
 }
 
@@ -69,10 +67,6 @@ impl Display for DhcpStates {
                 write!(f, "Request")
             }
             DhcpStates::Done => write!(f, "Done"),
-            DhcpStates::WaitForDhcpAck(_info) => {
-                write!(f, "WaitForDhcpAck")
-            }
-            DhcpStates::ArpReply => write!(f, "ArpReply"),
         }
     }
 }
@@ -193,7 +187,7 @@ impl DhcpSocket {
                 */
                 match info.firmware_type {
                     dhcp::parse::FirmwareType::Unknown => {
-                        self.set_state(DhcpStates::ArpReply);
+                        self.set_state(DhcpStates::Request);
                     }
                     dhcp::parse::FirmwareType::IPxe => {
                         info!("iPXE firmware detected. Jumping to TFTP phase");
@@ -235,8 +229,7 @@ impl DhcpSocket {
                     match scope {
                         utils::TargetingScope::Unicast => (),
                         utils::TargetingScope::Broadcast => {
-                            self.set_state(DhcpStates::WaitForDhcpAck(info));
-                            return Err(Error::WaitForDhcpAck);
+                            todo!("Broadcast not yet implemented");
                         }
                         utils::TargetingScope::Multicast => todo!("Multicast is not supported"),
                     }
@@ -274,39 +267,6 @@ impl DhcpSocket {
 
                 self.set_state(DhcpStates::Done);
 
-                Ok(packet)
-            }
-            DhcpStates::WaitForDhcpAck(info) => {
-                let dhcp = utils::handle_dhcp_ack(rx_buffer).unwrap();
-                let client_ip_addr = dhcp.your_ip();
-
-                let dhcp_repr =
-                    dhcp::construct::pxe_ack(info, self.server_ip, &self.offer_file_name);
-                // let packet = utils::dhcp_to_ether_unicast(
-                //     dhcp_repr.borrow_repr(),
-                //     &client_ip_addr,
-                //     &dhcp.client_hardware_address(),
-                //     &self.server_ip,
-                //     &self.server_mac,
-                // );
-
-                log::info!("Sent PXE ACK");
-
-                /*
-                Step 7. The client downloads the executable file using either standard TFTP (port69) or MTFTP
-                (port assigned in Boot Server Ack packet). The file downloaded and the placement of the
-                downloaded code in memory is dependent on the client’s CPU architecture.
-                */
-
-                self.set_state(DhcpStates::ArpReply);
-                todo!();
-                // Ok(packet)
-
-                //self.set_state(DhcpStates::Request(info.transaction_id));
-            }
-            DhcpStates::ArpReply => {
-                let packet = utils::arp_respond(rx_buffer, &self.server_ip, &self.server_mac)?;
-                self.set_state(DhcpStates::Request);
                 Ok(packet)
             }
             DhcpStates::Done => Err(Error::DhcpProtocolFinished),

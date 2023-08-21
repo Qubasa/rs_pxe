@@ -4,10 +4,10 @@ use smoltcp::{
     wire::{ArpRepr, EthernetAddress, Ipv4Address},
 };
 
+use super::error::*;
 use super::parse::Repr;
 use super::parse::{self, TftpOption};
 use super::utils;
-use crate::prelude::*;
 
 use std::{collections::BTreeMap, fmt::Formatter, io::Seek};
 

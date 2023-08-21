@@ -4,13 +4,13 @@ use smoltcp::{
     wire::{ArpRepr, EthernetAddress, Ipv4Address},
 };
 
+use super::error::*;
 use super::utils;
 use super::{construct::TftpConnection, parse::Repr};
 use super::{
     construct::{TestTftp, TftpError, TftpOptionEnum, Transfer},
     parse::{self, TftpOption},
 };
-use crate::prelude::*;
 
 use ouroboros::self_referencing;
 use std::{
