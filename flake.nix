@@ -87,6 +87,7 @@
             #  "smoltcp-0.9.1" = smoltcp.narHash;
             #};
           };
+          doCheck = false; # Disable CI tests because they don't work with garnix CI right now
 
           pname = "pxe-rs";
           #nativeBuildInputs = [ pkgs.breakpointHook ];
