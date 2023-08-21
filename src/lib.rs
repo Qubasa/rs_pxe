@@ -11,6 +11,7 @@ mod utils;
 #[cfg(test)]
 mod tests;
 
+use dhcp::parse::FirmwareType;
 use prelude::*;
 use smoltcp::wire::ArpRepr;
 use tftp::construct::TftpError;
@@ -74,19 +75,19 @@ use uuid::Uuid;
 
 use crate::tftp::socket::TftpStates;
 
-static ARP_TIMEOUT: Duration = Duration::from_secs(15);
+static ARP_TIMEOUT: Duration = Duration::from_secs(120);
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub enum PxeStates {
     Dhcp,
-    Tftp,
+    Tftp(FirmwareType),
 }
 
 impl Display for PxeStates {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             PxeStates::Dhcp => write!(f, "Dhcp"),
-            PxeStates::Tftp => write!(f, "Tftp"),
+            PxeStates::Tftp(firmware) => write!(f, "Tftp with firmware: {:?}", firmware),
         }
     }
 }
@@ -187,7 +188,9 @@ impl PxeSocket {
             PxeStates::Dhcp => match self.dhcp_socket.process(rx_buffer) {
                 Ok(packet) => Ok(packet),
                 Err(dhcp::error::Error::DhcpProtocolFinished) => {
-                    self.set_state(PxeStates::Tftp);
+                    self.set_state(PxeStates::Tftp(
+                        self.dhcp_socket.get_firmware_type().unwrap(),
+                    ));
                     self.process(rx_buffer)
                 }
 
@@ -201,14 +204,15 @@ impl PxeSocket {
                 )),
                 Err(e) => panic!("{}", e),
             },
-            PxeStates::Tftp => {
+            PxeStates::Tftp(firmware_type) => {
                 if self.tftp_socket.is_none() {
                     match self.dhcp_socket.get_firmware_type().unwrap() {
-                        dhcp::parse::FirmwareType::Unknown => {
+                        dhcp::parse::FirmwareType::Intel => {
                             self.tftp_socket = Some(TftpSocket::new(
                                 self.server_mac,
                                 self.server_ip,
                                 self.get_stage_one(),
+                                *firmware_type,
                             ));
                         }
                         dhcp::parse::FirmwareType::IPxe => {
@@ -216,6 +220,7 @@ impl PxeSocket {
                                 self.server_mac,
                                 self.server_ip,
                                 self.get_stage_two(),
+                                *firmware_type,
                             ));
                         }
                     }

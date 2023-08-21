@@ -61,6 +61,7 @@
           rust-analyzer-nightly
           dhcpcd
           dnsmasq
+          pixiecore
           entr
         ];
 

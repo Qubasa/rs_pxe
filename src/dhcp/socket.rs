@@ -190,7 +190,7 @@ impl DhcpSocket {
                 simply use the address.
                 */
                 match info.firmware_type {
-                    dhcp::parse::FirmwareType::Unknown => {
+                    dhcp::parse::FirmwareType::Intel => {
                         self.set_state(DhcpStates::Request);
                     }
                     dhcp::parse::FirmwareType::IPxe => {

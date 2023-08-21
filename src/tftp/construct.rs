@@ -1,3 +1,4 @@
+use indexmap::IndexMap;
 use log::*;
 use smoltcp::{
     time::{Duration, Instant},
@@ -150,6 +151,7 @@ pub trait Handle {
 pub enum TftpOptionEnum {
     Blksize,
     Tsize,
+    WindowSize,
 }
 
 impl From<&TftpOptionEnum> for &str {
@@ -157,24 +159,25 @@ impl From<&TftpOptionEnum> for &str {
         match &opt {
             TftpOptionEnum::Blksize => "blksize",
             TftpOptionEnum::Tsize => "tsize",
+            TftpOptionEnum::WindowSize => "windowsize",
         }
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct TftpOptions {
-    opts: BTreeMap<TftpOptionEnum, usize>,
+    opts: IndexMap<TftpOptionEnum, usize>,
 }
 
 impl TftpOptions {
     pub fn new() -> Self {
         Self {
-            opts: BTreeMap::new(),
+            opts: IndexMap::new(),
         }
     }
 
-    pub fn to_str_str(&self) -> BTreeMap<String, String> {
-        let mut map = BTreeMap::new();
+    pub fn to_str_str(&self) -> IndexMap<String, String> {
+        let mut map = IndexMap::new();
 
         for (k, v) in self.opts.iter() {
             let k: &str = k.into();

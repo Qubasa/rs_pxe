@@ -1,8 +1,11 @@
 use log::*;
+
 use smoltcp::{
     time::{Duration, Instant},
     wire::{ArpRepr, EthernetAddress, Ipv4Address},
 };
+
+use crate::dhcp::parse::FirmwareType;
 
 use super::error::*;
 use super::utils;
@@ -38,8 +41,8 @@ pub struct TftpPacketWrapper {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum TftpStates {
-    Tsize,
-    BlkSize,
+    ReadRequest,
+    SecondReadRequest,
     Data,
     Error,
 }
@@ -47,8 +50,8 @@ pub enum TftpStates {
 impl Display for TftpStates {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            TftpStates::Tsize => write!(f, "Tsize"),
-            TftpStates::BlkSize => write!(f, "BlkSize"),
+            TftpStates::ReadRequest => write!(f, "Tsize"),
+            TftpStates::SecondReadRequest => write!(f, "SecondReadRequest"),
             TftpStates::Data => write!(f, "Data"),
             TftpStates::Error => write!(f, "Error"),
         }
@@ -61,13 +64,20 @@ pub struct TftpSocket {
     server_mac: EthernetAddress,
     server_ip: Ipv4Address,
     file_path: PathBuf,
+    firmware_type: FirmwareType,
     transfer: Option<Transfer<TestTftp>>,
 }
 
 impl TftpSocket {
-    pub fn new(server_mac: EthernetAddress, server_ip: Ipv4Address, file_path: &Path) -> Self {
+    pub fn new(
+        server_mac: EthernetAddress,
+        server_ip: Ipv4Address,
+        file_path: &Path,
+        firmware_type: FirmwareType,
+    ) -> Self {
         Self {
-            _state: TftpStates::Tsize,
+            _state: TftpStates::ReadRequest,
+            firmware_type,
             file_path: file_path.to_path_buf(),
             server_mac,
             server_ip,
@@ -103,50 +113,34 @@ impl TftpSocket {
         let (tftp_con, wrapper) = self.recv_tftp(rx_buffer)?;
 
         match self.get_state() {
-            TftpStates::Tsize => {
-                let trans = self.parse_ack_options(&wrapper, tftp_con).unwrap();
+            TftpStates::ReadRequest => {
+                let trans = match self.parse_ack_options(&wrapper, tftp_con) {
+                    Ok(transfer) => transfer,
+                    Err(e) => panic!("Received unexpected tftp error: {}", e),
+                };
 
-                // If both tsize and blksize are present, we can go straight to data state
-                if trans.options.has(TftpOptionEnum::Tsize)
-                    && trans.options.has(TftpOptionEnum::Blksize)
-                {
-                    self.set_state(TftpStates::Data);
-
-                // If only tsize is present, we need to request blksize
-                } else if trans.options.has(TftpOptionEnum::Tsize) {
-                    self.set_state(TftpStates::BlkSize);
-
-                // Else throw error
-                } else {
-                    return Err(Error::Tftp(f!(
-                        "Missing tsize option. Got options: {:?}",
-                        trans.options
-                    )));
-                }
                 let packet = trans.ack_options().unwrap();
                 self.transfer = Some(trans);
+
+                match self.firmware_type {
+                    FirmwareType::Intel => self.set_state(TftpStates::SecondReadRequest),
+                    FirmwareType::IPxe => self.set_state(TftpStates::Data),
+                }
+
                 Ok(packet)
             }
-            TftpStates::BlkSize => {
+            TftpStates::SecondReadRequest => {
                 let trans = {
                     match self.parse_ack_options(&wrapper, tftp_con) {
                         Ok(ack_opts) => ack_opts,
                         Err(e) => {
-                            if let Error::TftpReceivedError(code, msg) = e {
-                                if u16::from(code) == 0u16 {
-                                    // Reset transfer because we received an error
-                                    // This is expected and this is how the Intel firmware does
-                                    // multiple tftp options in separate packets. This is not spec
-                                    // compliant. Eyyy
-                                    self.transfer = None;
-                                    return Err(Error::IgnoreNoLog(msg));
-                                } else {
-                                    panic!(
-                                        "Received unexpected tftp error: {}",
-                                        Error::TftpReceivedError(code, msg)
-                                    );
-                                    //return Err(Error::TftpReceivedError(code, msg));
-                                }
+                            if let Error::TftpReceivedError(_, msg) = e {
+                                // Reset transfer because we received an error
+                                // This is expected and this is how the Intel firmware does
+                                // multiple tftp options in separate packets. This is not spec
+                                // compliant. Eyyy
+                                self.transfer = None;
+                                return Err(Error::IgnoreNoLog(msg));
                             } else {
                                 panic!("Received unexpected tftp error: {}", e);
                                 //return Err(e);
@@ -245,6 +239,9 @@ impl TftpSocket {
                                 let tsize = t.handle.file.metadata()?.len();
                                 log::debug!("tftp: tsize: {}", tsize);
                                 t.options.add(TftpOptionEnum::Tsize, tsize as usize);
+                            }
+                            "windowsize" => {
+                                t.options.add(TftpOptionEnum::WindowSize, 1);
                             }
                             _ => warn!("Unhandled tftp option: {}={}", name, value),
                         }

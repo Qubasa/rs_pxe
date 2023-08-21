@@ -10,7 +10,7 @@ use std::convert::TryFrom;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum FirmwareType {
-    Unknown,
+    Intel,
     IPxe,
 }
 
@@ -35,7 +35,7 @@ pub fn pxe_discover(dhcp: DhcpPacket<&[u8]>) -> Result<PxeClientInfo> {
     let mut network_interface_version: Option<NetworkInterfaceVersion> = None;
     let mut client_uuid: Option<PxeUuid> = None;
     let mut client_identifier: Option<ClientIdentifier> = None;
-    let mut firmware_type: FirmwareType = FirmwareType::Unknown;
+    let mut firmware_type: FirmwareType = FirmwareType::Intel;
 
     if dhcp.opcode() != DhcpMessageType::Request.opcode() {
         return Err(Error::Ignore("Not a dhcp request".to_string()));

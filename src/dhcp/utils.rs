@@ -267,17 +267,6 @@ pub fn uni_broad_ether_to_dhcp<'a>(
         }
     };
 
-    let target_scope: TargetingScope = {
-        if ipv4.dst_addr().is_broadcast() {
-            TargetingScope::Broadcast
-        } else if ipv4.dst_addr().is_multicast() {
-            TargetingScope::Multicast
-        } else {
-            debug_assert!(ipv4.dst_addr().is_unicast());
-            TargetingScope::Unicast
-        }
-    };
-
     if ipv4.dst_addr() != *server_ip && !ipv4.dst_addr().is_broadcast() {
         return Err(Error::IgnoreNoLog(
             "IP destination does not match our server ip".to_string(),
@@ -311,6 +300,17 @@ pub fn uni_broad_ether_to_dhcp<'a>(
         Err(e) => {
             let err = format!("Parsing dhcp packet failed: {}", e);
             return Err(Error::Ignore(err));
+        }
+    };
+
+    let target_scope: TargetingScope = {
+        if ipv4.dst_addr().is_broadcast() {
+            TargetingScope::Broadcast
+        } else if ipv4.dst_addr().is_multicast() {
+            TargetingScope::Multicast
+        } else {
+            debug_assert!(ipv4.dst_addr().is_unicast());
+            TargetingScope::Unicast
         }
     };
 
