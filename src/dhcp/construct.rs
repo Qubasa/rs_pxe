@@ -66,7 +66,7 @@ pub fn pxe_ack(info: &PxeClientInfo, server_ip: Ipv4Address, boot_file: &str) ->
         t => panic!("Unsupported hardware type: {:#?}", t),
     };
 
-    let options: Vec<DhcpOptionWrapper> = vec![];
+    let options = vec![];
 
     DhcpReprWrapperBuilder {
         mdata: options,
@@ -86,7 +86,7 @@ pub fn pxe_ack(info: &PxeClientInfo, server_ip: Ipv4Address, boot_file: &str) ->
                 client_ip: IP_NULL,
                 your_ip: IP_NULL,
                 server_ip,
-                broadcast: true,
+                broadcast: false,
                 relay_agent_ip: IP_NULL,
 
                 // unimportant

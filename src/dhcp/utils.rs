@@ -1,3 +1,4 @@
+use std::fmt::Display;
 use std::net::IpAddr;
 use std::os::fd::AsRawFd;
 
@@ -184,7 +185,7 @@ pub fn arp_respond(
     }
 }
 
-pub fn handle_dhcp_ack(buffer: &[u8], transaction_id: u32) -> Result<DhcpPacket<&[u8]>> {
+pub fn handle_dhcp_ack(buffer: &[u8]) -> Result<DhcpPacket<&[u8]>> {
     let ether = EthernetFrame::new_checked(buffer).unwrap();
 
     if !ether.dst_addr().is_broadcast() {
@@ -226,14 +227,6 @@ pub fn handle_dhcp_ack(buffer: &[u8], transaction_id: u32) -> Result<DhcpPacket<
             return Err(Error::Ignore(err));
         }
     };
-
-    if dhcp.transaction_id() != transaction_id {
-        return Err(Error::Ignore(f!(
-            "Unmatching transaction_ud. Waiting for ACK with id {} is however {}",
-            transaction_id,
-            dhcp.transaction_id()
-        )));
-    }
     Ok(dhcp)
 }
 
@@ -241,7 +234,7 @@ pub fn uni_broad_ether_to_dhcp<'a>(
     buffer: &'a [u8],
     server_mac: &'a EthernetAddress,
     server_ip: &'a Ipv4Address,
-) -> Result<(DhcpPacket<&'a [u8]>, TargetingScope)> {
+) -> Result<(DhcpPacket<&'a [u8]>, TargetingScope, DhcpConnection)> {
     let ether = EthernetFrame::new_checked(buffer).unwrap();
     if ether.dst_addr() != *server_mac {
         // && !ether.dst_addr().is_broadcast()
@@ -306,7 +299,17 @@ pub fn uni_broad_ether_to_dhcp<'a>(
             return Err(Error::Ignore(err));
         }
     };
-    Ok((dhcp, target_scope))
+
+    let connection = DhcpConnection {
+        server_ip: server_ip.clone(),
+        server_mac: server_mac.clone(),
+        client_ip: dhcp.client_ip(),
+        client_mac: dhcp.client_hardware_address(),
+        server_port: udp.dst_port(),
+        client_port: udp.src_port(),
+    };
+
+    Ok((dhcp, target_scope, connection))
 }
 
 pub fn dhcp_to_ether_brdcast<'a>(
@@ -366,32 +369,46 @@ pub fn dhcp_to_ether_brdcast<'a>(
     buffer
 }
 
-pub fn dhcp_to_ether_unicast<'a>(
-    dhcp: &'a DhcpRepr<'a>,
-    ip_dst_addr: &'a Ipv4Address,
-    mac_dst_addr: &'a EthernetAddress,
-    server_ip: &'a Ipv4Address,
-    server_mac: &'a EthernetAddress,
-) -> Vec<u8> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct DhcpConnection {
+    pub server_ip: Ipv4Address,
+    pub server_mac: EthernetAddress,
+    pub client_ip: Ipv4Address,
+    pub client_mac: EthernetAddress,
+    pub server_port: u16,
+    pub client_port: u16,
+}
+
+impl Display for DhcpConnection {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(
+            f,
+            "{}:{} -> {}:{}",
+            self.client_ip, self.client_port, self.server_ip, self.server_port
+        )
+    }
+}
+
+pub fn dhcp_to_ether_unicast<'a>(dhcp: &'a DhcpRepr<'a>, con: DhcpConnection) -> Vec<u8> {
     let mut checksum = ChecksumCapabilities::ignored();
     checksum.ipv4 = Checksum::Both;
     checksum.udp = Checksum::Both;
 
     let udp_packet = UdpRepr {
-        src_port: 67,
-        dst_port: 68,
+        src_port: con.server_port,
+        dst_port: con.client_port,
     };
     let ip_packet = Ipv4Repr {
-        src_addr: *server_ip,
-        dst_addr: *ip_dst_addr,
+        src_addr: con.server_ip,
+        dst_addr: con.client_ip,
         hop_limit: 128,
         payload_len: dhcp.buffer_len() + udp_packet.header_len(),
         next_header: IpProtocol::Udp,
     };
 
     let eth_packet = EthernetRepr {
-        dst_addr: *mac_dst_addr,
-        src_addr: *server_mac,
+        dst_addr: con.client_mac,
+        src_addr: con.server_mac,
         ethertype: EthernetProtocol::Ipv4,
     };
 

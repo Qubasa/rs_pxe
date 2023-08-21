@@ -122,7 +122,7 @@ cargo build
 sudo setcap cap_net_admin,cap_net_raw=eip ./target/debug/rs_pxe
 
 
-./target/debug/rs_pxe -l $LOG_LEVEL --ipxe ./assets/ipxe.pxe --kernel ./assets/kernel.elf --raw -i $LAN --ip 192.168.32.1/24 --mac "36:ff:35:46:e0:eb" &
+./target/debug/rs_pxe -l $LOG_LEVEL --ipxe ./assets/ipxe.pxe --kernel ./assets/kernel.elf --raw -i $LAN  &
 
 
 # IPXE Boot Emulation

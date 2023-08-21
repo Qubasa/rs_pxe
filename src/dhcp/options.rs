@@ -204,6 +204,21 @@ impl From<ClientArchType> for u16 {
     }
 }
 
+impl From<ClientArchType> for DhcpOptionWrapper {
+    fn from(val: ClientArchType) -> Self {
+        let val = u16::from(val).to_be_bytes();
+        DhcpOptionWrapperBuilder {
+            mdata: val.to_vec(),
+            option_builder: |data| {
+                let kind = SubsetDhcpOption::ClientSystemArchitecture.into();
+                let data = data;
+                DhcpOption { kind, data }
+            },
+        }
+        .build()
+    }
+}
+
 #[repr(u8)]
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
@@ -253,6 +268,22 @@ impl TryFrom<&[u8]> for NetworkInterfaceVersion {
         })
     }
 }
+
+impl From<NetworkInterfaceVersion> for DhcpOptionWrapper {
+    fn from(val: NetworkInterfaceVersion) -> Self {
+        let val: [u8; 3] = [val.interface_type.into(), val.minor, val.major];
+        DhcpOptionWrapperBuilder {
+            mdata: val.to_vec(),
+            option_builder: |data| {
+                let kind = SubsetDhcpOption::ClientNetworkInterfaceIdentifier.into();
+                let data = data;
+                DhcpOption { kind, data }
+            },
+        }
+        .build()
+    }
+}
+
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum HardwareType {
     DomainName = 0,

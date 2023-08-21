@@ -44,6 +44,7 @@ use std::str::FromStr;
 use uuid::Uuid;
 
 use crate::dhcp;
+use crate::dhcp::utils::DhcpConnection;
 
 use super::parse::PxeClientInfo;
 use super::utils;
@@ -82,7 +83,6 @@ pub struct DhcpSocket {
     offer_file_name: String,
     server_mac: EthernetAddress,
     server_ip: Ipv4Address,
-    transaction_id: Option<u32>,
     firmware_type: Option<dhcp::parse::FirmwareType>,
 }
 
@@ -129,7 +129,6 @@ impl DhcpSocket {
 
         Self {
             _state: state,
-            transaction_id: None,
             server_mac,
             server_ip,
             offer_file_name,
@@ -194,8 +193,7 @@ impl DhcpSocket {
                 */
                 match info.firmware_type {
                     dhcp::parse::FirmwareType::Unknown => {
-                        self.transaction_id = Some(info.transaction_id);
-                        self.set_state(DhcpStates::Request);
+                        self.set_state(DhcpStates::ArpReply);
                     }
                     dhcp::parse::FirmwareType::IPxe => {
                         info!("iPXE firmware detected. Jumping to TFTP phase");
@@ -221,8 +219,8 @@ impl DhcpSocket {
                   - A DHCP option 60, Class ID, set to “PXEClient:Arch:xxxxx:UNDI:yyyzzz”.
                   - The Boot Server type in a PXE option field
                 */
-                let (info, ip, mac) = {
-                    let (dhcp, scope) = utils::uni_broad_ether_to_dhcp(
+                let (info, connection) = {
+                    let (dhcp, scope, connection) = utils::uni_broad_ether_to_dhcp(
                         rx_buffer,
                         &self.server_mac,
                         &self.server_ip,
@@ -234,10 +232,6 @@ impl DhcpSocket {
                         return Err(Error::Ignore("Not a dhcp request packet".to_string()));
                     }
 
-                    if info.transaction_id != self.transaction_id.unwrap() {
-                        return Err(Error::Ignore("Not the same transaction id".to_string()));
-                    }
-
                     match scope {
                         utils::TargetingScope::Unicast => (),
                         utils::TargetingScope::Broadcast => {
@@ -247,11 +241,11 @@ impl DhcpSocket {
                         utils::TargetingScope::Multicast => todo!("Multicast is not supported"),
                     }
 
-                    Ok::<_, Error>((info, dhcp.client_ip(), dhcp.client_hardware_address()))
+                    Ok::<_, Error>((info, connection))
                 }?;
 
                 log::info!("Parsed PXE Request");
-                log::info!("Sending PXE ACK to {} with ip {}", mac, ip);
+                log::info!("Sending PXE ACK.");
 
                 // Breaks here because we send an ACK with IP broadcast back but we need to send an ACK with IP unicast
                 // However to know the IP Address of the PXE Client we need to wait for the DHCP server to ACK the Requested IP first
@@ -268,13 +262,7 @@ impl DhcpSocket {
 
                 let dhcp_repr =
                     dhcp::construct::pxe_ack(&info, self.server_ip, &self.offer_file_name);
-                let packet = utils::dhcp_to_ether_unicast(
-                    dhcp_repr.borrow_repr(),
-                    &ip,
-                    &mac,
-                    &self.server_ip,
-                    &self.server_mac,
-                );
+                let packet = utils::dhcp_to_ether_unicast(dhcp_repr.borrow_repr(), connection);
 
                 log::info!("Sent PXE ACK");
 
@@ -289,18 +277,18 @@ impl DhcpSocket {
                 Ok(packet)
             }
             DhcpStates::WaitForDhcpAck(info) => {
-                let dhcp = utils::handle_dhcp_ack(rx_buffer, self.transaction_id.unwrap()).unwrap();
+                let dhcp = utils::handle_dhcp_ack(rx_buffer).unwrap();
                 let client_ip_addr = dhcp.your_ip();
 
                 let dhcp_repr =
                     dhcp::construct::pxe_ack(info, self.server_ip, &self.offer_file_name);
-                let packet = utils::dhcp_to_ether_unicast(
-                    dhcp_repr.borrow_repr(),
-                    &client_ip_addr,
-                    &dhcp.client_hardware_address(),
-                    &self.server_ip,
-                    &self.server_mac,
-                );
+                // let packet = utils::dhcp_to_ether_unicast(
+                //     dhcp_repr.borrow_repr(),
+                //     &client_ip_addr,
+                //     &dhcp.client_hardware_address(),
+                //     &self.server_ip,
+                //     &self.server_mac,
+                // );
 
                 log::info!("Sent PXE ACK");
 
@@ -311,18 +299,15 @@ impl DhcpSocket {
                 */
 
                 self.set_state(DhcpStates::ArpReply);
-
-                Ok(packet)
+                todo!();
+                // Ok(packet)
 
                 //self.set_state(DhcpStates::Request(info.transaction_id));
             }
             DhcpStates::ArpReply => {
+                let packet = utils::arp_respond(rx_buffer, &self.server_ip, &self.server_mac)?;
                 self.set_state(DhcpStates::Request);
-                Ok(utils::arp_respond(
-                    rx_buffer,
-                    &self.server_ip,
-                    &self.server_mac,
-                )?)
+                Ok(packet)
             }
             DhcpStates::Done => Err(Error::DhcpProtocolFinished),
         }

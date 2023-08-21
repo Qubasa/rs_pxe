@@ -74,7 +74,7 @@ use uuid::Uuid;
 
 use crate::tftp::socket::TftpStates;
 
-static ARP_TIMEOUT: Duration = Duration::from_secs(1);
+static ARP_TIMEOUT: Duration = Duration::from_secs(15);
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum PxeStates {
@@ -170,7 +170,7 @@ impl PxeSocket {
 
         Self {
             _state: state,
-            timeout: Instant::now() + ARP_TIMEOUT,
+            timeout: Instant::now(),
             tftp_socket: None,
             server_mac,
             server_ip,
