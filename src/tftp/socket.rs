@@ -166,6 +166,7 @@ impl TftpSocket {
                     self.transfer = None;
                     Err(Error::TftpEndOfFile)
                 }
+                Err(Error::Ignore(e)) => Err(Error::Ignore(e)),
                 Err(e) => panic!("Received unexpected tftp error: {}", e),
             },
             TftpStates::Error => todo!(),

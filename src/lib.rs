@@ -196,9 +196,9 @@ impl PxeSocket {
                 Err(dhcp::error::Error::MissingDhcpOption(opt)) => {
                     Err(Error::Ignore(f!("Missing DHCP option: {opt}")))
                 }
-                Err(dhcp::error::Error::WaitForDhcpAck) => {
-                    Err(Error::Ignore("Waiting for DHCP Ack Packet".to_string()))
-                }
+                Err(dhcp::error::Error::WaitForDhcpAck) => Err(Error::Ignore(
+                    "Waiting for DHCP Ack packet of router".to_string(),
+                )),
                 Err(e) => panic!("{}", e),
             },
             PxeStates::Tftp => {

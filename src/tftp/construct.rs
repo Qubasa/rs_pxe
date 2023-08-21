@@ -113,10 +113,13 @@ impl Handle for TestTftp {
     }
 
     fn repeat_last_read(&mut self, buf: &mut [u8]) -> Result<usize> {
-        if buf.len() != self.last_read {
+        if buf.len() != self.last_read && self.last_read != 0 {
             return Err(Error::Generic(
                 "Buffer size does not match last read size".to_string(),
             ));
+        } else if self.last_read == 0 {
+            error!("Only repeat of data packets is currently supported. But TFTP Ack seems to need to be replayed. TBD.");
+            return Err(Error::Ignore("No last read".to_string()));
         }
 
         self.file
@@ -303,7 +306,7 @@ where
 
     pub fn send_data(&mut self, ack_block_num: u16) -> Result<Vec<u8>> {
         if ack_block_num != self.last_block_num {
-            return Err(Error::Tftp(f!(
+            return Err(Error::Ignore(f!(
                 "tftp: received ack for block {} but expected {}",
                 ack_block_num,
                 self.last_block_num

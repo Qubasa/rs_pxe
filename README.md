@@ -1,10 +1,14 @@
 # Rs_pxe
-An 'all in one' command line PXE boot utility. Includes a PXE specific DHCP server and a TFTP server. It uses a RAW_SOCKET to talk to the network. Only supports Ethernet.
+An 'all in one' command line PXE boot utility. Includes a PXE specific DHCP server and a TFTP server. It uses a RAW_SOCKET to talk to the network. This works on Ethernet as well as WIFI.
 
 ## Warning: Alpha Software
-This program is still in early stages and needs more hardware testing. Currently, rs_pxe has been tested successfully on Intel BIOS Boot with IPv4.
-Intel IPv4 UEFI support is currently being implemented. AMD CPUs have not been tested.
+This program is still in early stages and needs more hardware testing. Currently, rs_pxe works on the following architectures:
+- [x] Intel BIOS Boot with IPv4.
+- [ ] Intel UEFI Boot with IPv4. (Currently, in the making)
+- [ ] AMD BIOS Boot with IPv4.
+- [ ] AMD UEFI Boot with Ipv4.
 
+rs_pxe does work with Wi-Fi interfaces, however due to its unreliability, packets get reordered or lost more often, which currently breaks the state machine in most cases.
 
 ## Example Command
 ```bash

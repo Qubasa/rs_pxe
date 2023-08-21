@@ -56,6 +56,7 @@ use super::utils::TargetingScope;
 pub enum DhcpStates {
     Discover,
     Request,
+    WaitForDhcpAck(PxeClientInfo),
     Done,
 }
 
@@ -65,6 +66,9 @@ impl Display for DhcpStates {
             DhcpStates::Discover => write!(f, "Discover"),
             DhcpStates::Request => {
                 write!(f, "Request")
+            }
+            DhcpStates::WaitForDhcpAck(_info) => {
+                write!(f, "WaitForDhcpAck")
             }
             DhcpStates::Done => write!(f, "Done"),
         }
@@ -229,7 +233,8 @@ impl DhcpSocket {
                     match scope {
                         utils::TargetingScope::Unicast => (),
                         utils::TargetingScope::Broadcast => {
-                            todo!("Broadcast not yet implemented");
+                            self.set_state(DhcpStates::WaitForDhcpAck(info));
+                            return Err(Error::WaitForDhcpAck);
                         }
                         utils::TargetingScope::Multicast => todo!("Multicast is not supported"),
                     }
@@ -267,6 +272,25 @@ impl DhcpSocket {
 
                 self.set_state(DhcpStates::Done);
 
+                Ok(packet)
+            }
+            DhcpStates::WaitForDhcpAck(info) => {
+                let (_, connection) =
+                    utils::handle_dhcp_ack(rx_buffer, &self.server_mac, &self.server_ip)?;
+
+                let dhcp_repr =
+                    dhcp::construct::pxe_ack(info, self.server_ip, &self.offer_file_name);
+
+                let packet = utils::dhcp_to_ether_unicast(dhcp_repr.borrow_repr(), connection);
+
+                log::info!("Sent PXE ACK");
+
+                /*
+                Step 7. The client downloads the executable file using either standard TFTP (port69) or MTFTP
+                (port assigned in Boot Server Ack packet). The file downloaded and the placement of the
+                downloaded code in memory is dependent on the client’s CPU architecture.
+                */
+                self.set_state(DhcpStates::Done);
                 Ok(packet)
             }
             DhcpStates::Done => Err(Error::DhcpProtocolFinished),

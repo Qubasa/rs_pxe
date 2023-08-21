@@ -185,7 +185,11 @@ pub fn arp_respond(
     }
 }
 
-pub fn handle_dhcp_ack(buffer: &[u8]) -> Result<DhcpPacket<&[u8]>> {
+pub fn handle_dhcp_ack<'a>(
+    buffer: &'a [u8],
+    server_mac: &'a EthernetAddress,
+    server_ip: &'a Ipv4Address,
+) -> Result<(DhcpPacket<&'a [u8]>, DhcpConnection)> {
     let ether = EthernetFrame::new_checked(buffer).unwrap();
 
     if !ether.dst_addr().is_broadcast() {
@@ -227,7 +231,17 @@ pub fn handle_dhcp_ack(buffer: &[u8]) -> Result<DhcpPacket<&[u8]>> {
             return Err(Error::Ignore(err));
         }
     };
-    Ok(dhcp)
+
+    let connection = DhcpConnection {
+        server_ip: *server_ip,
+        server_mac: *server_mac,
+        client_ip: dhcp.client_ip(),
+        client_mac: dhcp.client_hardware_address(),
+        server_port: udp.dst_port(),
+        client_port: udp.src_port(),
+    };
+
+    Ok((dhcp, connection))
 }
 
 pub fn uni_broad_ether_to_dhcp<'a>(
