@@ -157,6 +157,7 @@ fn main() {
 
         loop {
             let timeout = Some(Duration::from_millis(250));
+            // Process timeout events in all state machines
             match pxe_socket.process_timeout() {
                 Ok(packet) => {
                     let mut tx = device.transmit(Instant::now()).unwrap();
@@ -181,8 +182,10 @@ fn main() {
                 Err(e) => panic!("{}", e),
             }
 
+            // Wait for socket to be ready to be read or timeout and continue
             phy_wait(fd, timeout).unwrap();
 
+            // Receive packet and create two tokens for reading (rx) and writing (tx)
             let (rx, tx) = match device.receive(Instant::now()) {
                 Some(res) => res,
                 None => {
@@ -192,8 +195,11 @@ fn main() {
                 }
             };
 
+            // Consume the received packet and process it with the meta state machine
             let packet = rx.consume(|buffer| pxe_socket.process(buffer));
 
+            // If the meta state machine returns a packet, send it
+            // else ignore the packet or panic if an error occurs
             match packet {
                 Ok(packet) => {
                     tx.consume(packet.len(), |buffer| {
